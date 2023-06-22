@@ -1,4 +1,4 @@
-DOCKER_DIRECTORY=/home/hpistor/resources/docker_rootfs/
+DOCKER_DIRECTORY=$(dirname "$0")/../rootfs/
 ROOTFS_DIR=/tmp-rootfs
 HOST_ROOTFS_DIR=/tmp$ROOTFS_DIR
 ROOTFS_FILE=/tmp/rootfs.ext4
@@ -14,7 +14,7 @@ dd if=/dev/zero of=$ROOTFS_FILE bs=1M count=50
 mkfs.ext4 $ROOTFS_FILE
 
 # Make sure directory is created
-sudo rm -f $HOST_ROOTFS_DIR && mkdir -p $HOST_ROOTFS_DIR
+sudo rm -rf $HOST_ROOTFS_DIR && mkdir -p $HOST_ROOTFS_DIR
 
 # Mount the filesystem 
 sudo mount $ROOTFS_FILE $HOST_ROOTFS_DIR

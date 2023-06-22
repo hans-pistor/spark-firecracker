@@ -18,10 +18,8 @@ RUN rc-update add devfs boot \
     && rc-update add procfs boot \
     && rc-update add sysfs boot
 
-COPY firecracker-internet /etc/init.d/firecracker-internet
-RUN chmod +x /etc/init.d/firecracker-internet
+COPY etc /etc
 
 RUN rc-update add firecracker-internet default
 
-COPY copy-to-rootfs.sh /root/copy-to-rootfs
-RUN chmod +x /root/copy-to-rootfs
+COPY root /root
