@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package api;
+
+service VmActions {
+    rpc Ping(PingRequest) returns (PingResponse);
+}
+
+
+message PingRequest {}
+message PingResponse {}
