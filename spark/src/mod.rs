@@ -1,5 +1,8 @@
 use crate::api::{vm_actions_server::VmActions, PingRequest, PingResponse};
 
+pub mod net;
+pub mod vm;
+
 pub mod api {
     tonic::include_proto!("api");
 }
