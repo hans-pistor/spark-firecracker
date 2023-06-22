@@ -10,8 +10,11 @@ KERNEL_BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off"
 # Make sure linux kernel is available
 [ -e $KERNEL_PATH ] || wget -P /tmp https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/kernels/vmlinux.bin
 
+# build spark & copy over the server binaries to the roofs
+$SCRIPT_DIRECTORY/build-spark
+
 # build the rootfs
-$SCRIPT_DIRECTORY/create-rootfs
+$SCRIPT_DIRECTORY/build-rootfs
 
 
 # Some networking setup

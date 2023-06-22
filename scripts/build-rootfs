@@ -8,7 +8,7 @@ DOCKER_TAG='rootfs-builder'
 rm -f $ROOTFS_FILE
 
 # Create file
-dd if=/dev/zero of=$ROOTFS_FILE bs=1M count=50
+dd if=/dev/zero of=$ROOTFS_FILE bs=1M count=1024
 
 # Create empty filesystem
 mkfs.ext4 $ROOTFS_FILE

@@ -19,7 +19,8 @@ RUN rc-update add devfs boot \
     && rc-update add sysfs boot
 
 COPY etc /etc
-
-RUN rc-update add firecracker-internet default
-
 COPY root /root
+copy usr /usr
+
+RUN rc-update add firecracker-internet default \
+    && rc-update add spark-server default
