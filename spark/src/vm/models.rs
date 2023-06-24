@@ -20,3 +20,11 @@ pub struct VmNetworkInterface {
     pub guest_mac: String,
     pub host_dev_name: String,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmLogger {
+    pub log_path: String,
+    pub level: String,
+    pub show_level: bool,
+    pub show_log_origin: bool,
+}

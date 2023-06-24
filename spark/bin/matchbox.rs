@@ -25,10 +25,13 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let _guard = IpTablesGuard::new()?;
 
-    let network = VMNetwork::new(0);
+    let vm_id = 0;
+    let network = VMNetwork::new(vm_id);
     network.create(&args.host_network_interface)?;
 
-    let machine = VirtualMachine::new(args.firecracker_path)
+    let machine = VirtualMachine::new(args.firecracker_path, vm_id)
+        .await?
+        .with_logger()
         .await?
         .setup_boot_source(VmBootSource {
             kernel_image_path: "/tmp/vmlinux.bin".into(),
