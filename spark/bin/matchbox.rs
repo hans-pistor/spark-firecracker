@@ -1,6 +1,6 @@
 use clap::Parser;
 use spark_lib::{
-    net::{IpTablesGuard, VMNetwork},
+    net::{IpTablesGuard, VmNetwork},
     vm::{
         models::{VmBootSource, VmDrive, VmNetworkInterface},
         VirtualMachine,
@@ -25,11 +25,7 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let _guard = IpTablesGuard::new()?;
 
-    let vm_id = 0;
-    let network = VMNetwork::new(vm_id);
-    network.create(&args.host_network_interface)?;
-
-    let machine = VirtualMachine::new(args.firecracker_path, vm_id)
+    let machine = VirtualMachine::new(&args.firecracker_path, 0)
         .await?
         .with_logger()
         .await?
@@ -45,18 +41,12 @@ async fn main() -> anyhow::Result<()> {
             is_read_only: false,
         })
         .await?
-        .add_network_interface(VmNetworkInterface {
-            iface_id: "eth0".into(),
-            guest_mac: "AA:FC:00:00:00:01".into(),
-            host_dev_name: network.tap_device_name.clone(),
-        })
+        .add_network_interface(&args.host_network_interface)
+        .await?
+        .start()
         .await?;
 
-    println!("Starting a VM on {}", network.ip_address);
-
-    let machine = machine.start().await?;
-
-    tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
 
     Ok(())
 }
