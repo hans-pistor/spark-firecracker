@@ -34,11 +34,18 @@ async fn main() -> anyhow::Result<()> {
             boot_args: "console=ttyS0 reboot=k panic=1 pci=off".into(),
         })
         .await?
-        .setup_root_fs(VmDrive {
+        .with_drive(VmDrive {
             drive_id: "rootfs".into(),
             path_on_host: "/tmp/rootfs.ext4".into(),
             is_root_device: true,
             is_read_only: false,
+        })
+        .await?
+        .with_drive(VmDrive {
+            drive_id: "block".into(),
+            path_on_host: "/tmp/block.ext4".into(),
+            is_root_device: false,
+            is_read_only: true,
         })
         .await?
         .add_network_interface(&args.host_network_interface)

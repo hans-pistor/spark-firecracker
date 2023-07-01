@@ -113,14 +113,14 @@ impl VirtualMachine<VmNotStarted> {
         Ok(self)
     }
 
-    pub async fn setup_root_fs(self, root_fs: VmDrive) -> anyhow::Result<Self> {
+    pub async fn with_drive(self, drive: VmDrive) -> anyhow::Result<Self> {
         let request = Request::builder()
             .method("PUT")
             .uri(Uri::new(
                 self.vm_state.firecracker_socket_path(),
-                &format!("/drives/{}", root_fs.drive_id),
+                &format!("/drives/{}", drive.drive_id),
             ))
-            .body(serde_json::to_string(&root_fs)?.into())?;
+            .body(serde_json::to_string(&drive)?.into())?;
 
         self.firecracker_client.request(request).await?;
 
