@@ -1,0 +1,2 @@
+rootfs/usr/bin/spark filter=lfs diff=lfs merge=lfs -text
+bin/firecracker filter=lfs diff=lfs merge=lfs -text
