@@ -2,9 +2,9 @@
 
 mkdir -p /var/run
 mkdir -p /var/log
-SCRIPT="/usr/bin/spark-server"
-PIDFILE=/var/run/spark-server.pid
-LOGFILE=/var/log/spark-server.log
+SCRIPT="/usr/bin/spark"
+PIDFILE=/var/run/spark.pid
+LOGFILE=/var/log/spark.log
 
 start() {
     if [ -f $PIDFILE ] && [ -s $PIDFILE ] && kill -0 $(cat $PIDFILE); then
@@ -21,9 +21,9 @@ start() {
     sleep 2
 
     PID=$(cat $PIDFILE)
-    if pgrep -f "spark-server" > /dev/null
+    if pgrep -f "spark" > /dev/null
     then
-        echo "spark-server is now running under PID $PID"
+        echo "spark is now running under PID $PID"
     else
         echo "Failed to start the spark server"
     fi

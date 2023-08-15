@@ -23,4 +23,4 @@ COPY root /root
 copy usr /usr
 
 RUN rc-update add firecracker-internet default \
-    && rc-update add spark-server default
+    && rc-update add spark default

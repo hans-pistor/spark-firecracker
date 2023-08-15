@@ -4,7 +4,7 @@ SCRIPT_DIRECTORY=$(dirname "$0")
 SPARK_DIR=$SCRIPT_DIRECTORY/../spark
 ROOTFS_DIR=$SCRIPT_DIRECTORY/../rootfs
 
-SPARK_SERVER_PATH=$SPARK_DIR/target/x86_64-unknown-linux-musl/debug/spark-server
+SPARK_SERVER_PATH=$SPARK_DIR/target/x86_64-unknown-linux-musl/debug/spark
 
 pushd $(pwd)
 cd $SPARK_DIR
