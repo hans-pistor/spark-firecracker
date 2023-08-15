@@ -6,7 +6,7 @@ KERNEL_PATH=/tmp/vmlinux.bin
 ROOTFS_PATH=/tmp/rootfs.ext4
 
 ARCH="$(uname -m)"
-KERNEL_BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off"
+KERNEL_BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off IP_ADDRESS::172.16.0.2 IFACE::eth0 GATEWAY::172.16.0.1"
 
 # Make sure linux kernel is available
 [ -e $KERNEL_PATH ] || wget -P /tmp https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/kernels/vmlinux.bin
@@ -22,13 +22,14 @@ $SCRIPT_DIRECTORY/build-rootfs
 TAP_DEVICE="tap0"
 HOST_IFACE="ens33"
 
+sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
+sudo iptables -t nat -A POSTROUTING -o $HOST_IFACE -j MASQUERADE
+sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
 sudo ip link del $TAP_DEVICE 2> /dev/null || true
 sudo ip tuntap add $TAP_DEVICE mode tap
 sudo ip addr add 172.16.0.1/24 dev $TAP_DEVICE
 sudo ip link set $TAP_DEVICE up
-sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
-sudo iptables -t nat -A POSTROUTING -o $HOST_IFACE -j MASQUERADE
-sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 sudo iptables -A FORWARD -i $TAP_DEVICE -o $HOST_IFACE -j ACCEPT
 
 

@@ -33,7 +33,7 @@ impl VmNetwork {
         // When received from tap device, forward it to the host network
         // interface
         let forward_to_host_args = format!(
-            "-A FORWARD -i {} -o {} -j ACCCEPT",
+            "-A FORWARD -i {} -o {} -j ACCEPT",
             tap_device_name, host_network_interface
         );
         Command::new("iptables")
@@ -62,11 +62,17 @@ impl Drop for VmNetwork {
 pub struct IpTablesGuard;
 
 impl IpTablesGuard {
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(host_iface: &str) -> anyhow::Result<Self> {
         let conntrack_args = "-A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT";
         Command::new("iptables")
             .args(conntrack_args.split(' '))
             .output()?;
+
+        let nat_args = format!("-t nat -A POSTROUTING -o {host_iface} -j MASQUERADE");
+        Command::new("iptables")
+            .args(nat_args.split(' '))
+            .output()?;
+
         Ok(Self {})
     }
 }

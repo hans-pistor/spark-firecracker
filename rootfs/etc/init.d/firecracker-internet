@@ -5,12 +5,39 @@ depend() {
 }
 
 start() {
-    ebegin "===========\n"
-    ebegin "FIRECRACKER NETWORKING START\n"
-    ip addr add 172.16.0.2/24 dev eth0
-    ip link set eth0 up
-    ip route add default via 172.16.0.1 dev eth0
+    einfo "Setting up firecracker internet"
+    eindent
 
+    einfo "Parsing cmdline $(cat /proc/cmdline)"
+    IP_ADDRESS=$(cat /proc/cmdline | sed -n 's/.*IP_ADDRESS::\([^ ]\+\).*/\1/p')
+    IFACE=$(cat /proc/cmdline | sed -n 's/.*IFACE::\([^ ]\+\).*/\1/p')
+    GATEWAY=$(cat /proc/cmdline | sed -n 's/.*GATEWAY::\([^ ]\+\).*/\1/p')
+
+    if [ -z "$IP_ADDRESS" ]; then
+        eerror "No IP address found in kernel command line"
+        eoutdent
+        return 1
+    fi
+
+    if [ -z "$IFACE" ]; then
+        eerror "No interface found in kernel command line"
+        eoutdent
+        return 1
+    fi
+
+    if [ -z "$GATEWAY" ]; then
+        eerror "No gateway found in kernel command line"
+        eoutdent
+        return 1
+    fi
+
+    einfo "Setting up ip routing for $IFACE with ip $IP_ADDRESS and gateway $GATEWAY"
+
+    ip addr add $IP_ADDRESS/24 dev $IFACE
+    ip link set $IFACE up
+    ip route add default via $GATEWAY dev $IFACE
+
+    eoutdent
     return 0
 }
 

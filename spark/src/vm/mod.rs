@@ -14,6 +14,9 @@ use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 
 pub mod models;
 
+pub const GUEST_INTERFACE: &str = "eth0";
+pub const HOST_GATEWAY: &str = "172.16.0.1";
+
 pub struct VmNotStarted;
 pub struct VmStarted;
 pub trait FirecrackerState {}
@@ -24,6 +27,7 @@ impl FirecrackerState for VmStarted {}
 struct VmState {
     vm_id: usize,
     data_directory: String,
+    boot_source: Option<VmBootSource>,
     _vm_network: Option<VmNetwork>,
 }
 
@@ -55,6 +59,7 @@ impl VirtualMachine<VmNotStarted> {
         let data_directory = VmState {
             vm_id,
             data_directory: data_directory_path,
+            boot_source: None,
             _vm_network: None,
         };
 
@@ -111,7 +116,13 @@ impl VirtualMachine<VmNotStarted> {
             .body(serde_json::to_string(&boot_source)?.into())?;
 
         self.firecracker_client.request(request).await?;
-        Ok(self)
+        Ok(Self {
+            vm_state: VmState {
+                boot_source: Some(boot_source),
+                ..self.vm_state
+            },
+            ..self
+        })
     }
 
     pub async fn with_drive(self, drive: VmDrive) -> anyhow::Result<Self> {
@@ -128,10 +139,14 @@ impl VirtualMachine<VmNotStarted> {
         Ok(self)
     }
 
-    pub async fn add_network_interface(self, host_network_interface: &str) -> anyhow::Result<Self> {
+    pub async fn add_network_interface(
+        self,
+        host_network_interface: &str,
+        ip_address: &str,
+    ) -> anyhow::Result<Self> {
         let vm_network = VmNetwork::create(self.vm_state.vm_id, host_network_interface)?;
         let vm_network_interface = VmNetworkInterface {
-            iface_id: "eth0".into(),
+            iface_id: GUEST_INTERFACE.into(),
             guest_mac: "AA:FC:00:00:00:01".into(),
             host_dev_name: vm_network.tap_device_name.clone(),
         };
@@ -146,13 +161,28 @@ impl VirtualMachine<VmNotStarted> {
 
         self.firecracker_client.request(request).await?;
 
-        Ok(Self {
+        let state_with_vm_network = Self {
             vm_state: VmState {
                 _vm_network: Some(vm_network),
                 ..self.vm_state
             },
             ..self
-        })
+        };
+
+        match state_with_vm_network.vm_state.boot_source.clone() {
+            None => panic!("Boot source must be set before adding a network interface"),
+            Some(boot_source) => {
+                state_with_vm_network
+                    .setup_boot_source(VmBootSource {
+                        boot_args: format!(
+                            "{} IP_ADDRESS::{} IFACE::{} GATEWAY::{}",
+                            boot_source.boot_args, ip_address, GUEST_INTERFACE, HOST_GATEWAY
+                        ),
+                        ..boot_source
+                    })
+                    .await
+            }
+        }
     }
 
     pub async fn start(self) -> anyhow::Result<VirtualMachine<VmStarted>> {

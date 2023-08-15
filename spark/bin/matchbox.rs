@@ -29,7 +29,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Args::parse();
-    let _guard = IpTablesGuard::new()?;
+    let _guard = IpTablesGuard::new(&config.host_network_interface)?;
 
     let _machine = VirtualMachine::new(&config.firecracker_path, 0)
         .await?
@@ -54,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
             is_read_only: true,
         })
         .await?
-        .add_network_interface(&config.host_network_interface)
+        .add_network_interface(&config.host_network_interface, "172.16.0.2")
         .await?
         .start()
         .await?;
