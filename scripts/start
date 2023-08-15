@@ -1,6 +1,7 @@
 set -eu
 
 SCRIPT_DIRECTORY=$(dirname "$0")
+BIN_DIR=$SCRIPT_DIRECTORY/../bin
 KERNEL_PATH=/tmp/vmlinux.bin
 ROOTFS_PATH=/tmp/rootfs.ext4
 
@@ -54,4 +55,4 @@ cat <<EOF > /tmp/vmconfig.json
   ]
 }
 EOF
-/home/hpistor/firecracker/build/cargo_target/${ARCH}-unknown-linux-musl/debug/firecracker --no-api --config-file /tmp/vmconfig.json
+$BIN_DIR/firecracker --no-api --config-file /tmp/vmconfig.json
