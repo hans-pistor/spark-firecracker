@@ -20,10 +20,11 @@ pub trait FirecrackerState {}
 impl FirecrackerState for VmNotStarted {}
 impl FirecrackerState for VmStarted {}
 
+#[derive(Debug)]
 struct VmState {
     vm_id: usize,
     data_directory: String,
-    vm_network: Option<VmNetwork>,
+    _vm_network: Option<VmNetwork>,
 }
 
 impl VmState {
@@ -54,7 +55,7 @@ impl VirtualMachine<VmNotStarted> {
         let data_directory = VmState {
             vm_id,
             data_directory: data_directory_path,
-            vm_network: None,
+            _vm_network: None,
         };
 
         let firecracker_process = Command::new(firecracker_path)
@@ -147,7 +148,7 @@ impl VirtualMachine<VmNotStarted> {
 
         Ok(Self {
             vm_state: VmState {
-                vm_network: Some(vm_network),
+                _vm_network: Some(vm_network),
                 ..self.vm_state
             },
             ..self

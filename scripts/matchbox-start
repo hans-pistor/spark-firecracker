@@ -1,0 +1,17 @@
+SCRIPT_DIRECTORY=$(dirname "$0")
+SPARK_DIR=$SCRIPT_DIRECTORY/../spark
+BIN_DIR=$SCRIPT_DIRECTORY/../bin
+
+pushd $(pwd)
+
+cd $SPARK_DIR
+
+# Build the matchbox binary
+cargo build --bin matchbox
+
+popd
+
+sudo $SPARK_DIR/target/x86_64-unknown-linux-musl/debug/matchbox \
+    --firecracker-path $BIN_DIR/firecracker \
+    --kernel-image-path /tmp/vmlinux.bin \
+    --root-fs-path /tmp/rootfs.ext4

@@ -1,5 +1,6 @@
 use std::process::Command;
 
+#[derive(Debug)]
 pub struct VmNetwork {
     pub tap_device_name: String,
     pub ip_address: String,
@@ -28,12 +29,6 @@ impl VmNetwork {
         Command::new("ip")
             .args(enable_tap_device_args.split(' '))
             .output()?;
-
-        // let nat_setup_for_vm_args =
-        //     format!("-t nat -A POSTROUTING -o {host_network_interface} -j MASQUERADE");
-        // Command::new("iptables")
-        //     .args(nat_setup_for_vm_args.split(' '))
-        //     .output()?;
 
         // When received from tap device, forward it to the host network
         // interface

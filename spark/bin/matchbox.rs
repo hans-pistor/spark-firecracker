@@ -1,8 +1,8 @@
 use clap::Parser;
 use spark_lib::{
-    net::{IpTablesGuard, VmNetwork},
+    net::IpTablesGuard,
     vm::{
-        models::{VmBootSource, VmDrive, VmNetworkInterface},
+        models::{VmBootSource, VmDrive},
         VirtualMachine,
     },
 };
@@ -13,30 +13,36 @@ struct Args {
     #[arg(long, default_value = "ens33")]
     host_network_interface: String,
 
-    #[arg(
-        long,
-        default_value = "/home/hpistor/firecracker/build/cargo_target/x86_64-unknown-linux-musl/debug/firecracker"
-    )]
+    #[arg(long)]
     firecracker_path: String,
+
+    #[arg(long)]
+    kernel_image_path: String,
+
+    #[arg(long, default_value = "console=ttyS0 reboot=k panic=1 pci=off")]
+    boot_args: String,
+
+    #[arg(long)]
+    root_fs_path: String,
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    let args = Args::parse();
+    let config = Args::parse();
     let _guard = IpTablesGuard::new()?;
 
-    let machine = VirtualMachine::new(&args.firecracker_path, 0)
+    let _machine = VirtualMachine::new(&config.firecracker_path, 0)
         .await?
         .with_logger()
         .await?
         .setup_boot_source(VmBootSource {
-            kernel_image_path: "/tmp/vmlinux.bin".into(),
-            boot_args: "console=ttyS0 reboot=k panic=1 pci=off".into(),
+            kernel_image_path: config.kernel_image_path.clone(),
+            boot_args: config.boot_args.clone(),
         })
         .await?
         .with_drive(VmDrive {
             drive_id: "rootfs".into(),
-            path_on_host: "/tmp/rootfs.ext4".into(),
+            path_on_host: config.root_fs_path.clone(),
             is_root_device: true,
             is_read_only: false,
         })
@@ -48,7 +54,7 @@ async fn main() -> anyhow::Result<()> {
             is_read_only: true,
         })
         .await?
-        .add_network_interface(&args.host_network_interface)
+        .add_network_interface(&config.host_network_interface)
         .await?
         .start()
         .await?;
