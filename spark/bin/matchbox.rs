@@ -1,11 +1,13 @@
 use clap::Parser;
 use spark_lib::{
-    net::IpTablesGuard,
+    net::{BridgeNetwork, IpTablesGuard},
     vm::{
         models::{VmBootSource, VmDrive},
-        VirtualMachine,
+        VirtualMachine, VmStarted,
     },
 };
+
+pub const BRIDGE_IP: &str = "172.16.0.1";
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
@@ -29,37 +31,37 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Args::parse();
+    let _bridge = BridgeNetwork::new("br0", BRIDGE_IP);
     let _guard = IpTablesGuard::new(&config.host_network_interface)?;
 
-    let _machine = VirtualMachine::new(&config.firecracker_path, 0)
+    let vm1 = spawn_vm(&config, 0).await?;
+    let vm2 = spawn_vm(&config, 1).await?;
+
+    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+
+    Ok(())
+}
+
+async fn spawn_vm(config: &Args, vm_id: usize) -> anyhow::Result<VirtualMachine<VmStarted>> {
+    assert!(vm_id + 2 < 256);
+    let ip_address = format!("172.16.0.{}", vm_id + 2);
+    let boot_source = VmBootSource {
+        kernel_image_path: config.kernel_image_path.clone(),
+        boot_args: config.boot_args.clone(),
+    };
+    let rootfs = VmDrive {
+        drive_id: "rootfs".into(),
+        path_on_host: config.root_fs_path.clone(),
+        is_root_device: true,
+        is_read_only: false,
+    };
+
+    VirtualMachine::new(&config.firecracker_path, vm_id, boot_source, rootfs)
         .await?
         .with_logger()
         .await?
-        .setup_boot_source(VmBootSource {
-            kernel_image_path: config.kernel_image_path.clone(),
-            boot_args: config.boot_args.clone(),
-        })
-        .await?
-        .with_drive(VmDrive {
-            drive_id: "rootfs".into(),
-            path_on_host: config.root_fs_path.clone(),
-            is_root_device: true,
-            is_read_only: false,
-        })
-        .await?
-        .with_drive(VmDrive {
-            drive_id: "block".into(),
-            path_on_host: "/tmp/block.ext4".into(),
-            is_root_device: false,
-            is_read_only: true,
-        })
-        .await?
-        .add_network_interface(&config.host_network_interface, "172.16.0.2")
+        .add_network_interface(&config.host_network_interface, &ip_address, BRIDGE_IP)
         .await?
         .start()
-        .await?;
-
-    tokio::time::sleep(std::time::Duration::from_secs(90)).await;
-
-    Ok(())
+        .await
 }

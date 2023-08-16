@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -23,7 +25,7 @@ pub struct VmNetworkInterface {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VmLogger {
-    pub log_path: String,
+    pub log_path: PathBuf,
     pub level: String,
     pub show_level: bool,
     pub show_log_origin: bool,

@@ -3,14 +3,12 @@ use std::process::Command;
 #[derive(Debug)]
 pub struct VmNetwork {
     pub tap_device_name: String,
-    pub ip_address: String,
 }
 
 impl VmNetwork {
     pub fn create(vm_id: usize, host_network_interface: &str) -> anyhow::Result<Self> {
         assert!(vm_id < 256);
         let tap_device_name = format!("fc-tap{vm_id}");
-        let ip_address = format!("172.16.{vm_id}.1/24");
 
         // Create the tap device
         let create_tap_device_args = format!("tuntap add {} mode tap", tap_device_name);
@@ -18,10 +16,9 @@ impl VmNetwork {
             .args(create_tap_device_args.split(' '))
             .output()?;
 
-        // Create an IP address for the tap device
-        let create_ip_address_args = format!("addr add {} dev {}", ip_address, tap_device_name);
+        let add_tap_device_to_bridge_args = format!("link set dev {tap_device_name} master br0");
         Command::new("ip")
-            .args(create_ip_address_args.split(' '))
+            .args(add_tap_device_to_bridge_args.split(' '))
             .output()?;
 
         // Enables the new tap device
@@ -30,20 +27,7 @@ impl VmNetwork {
             .args(enable_tap_device_args.split(' '))
             .output()?;
 
-        // When received from tap device, forward it to the host network
-        // interface
-        let forward_to_host_args = format!(
-            "-A FORWARD -i {} -o {} -j ACCEPT",
-            tap_device_name, host_network_interface
-        );
-        Command::new("iptables")
-            .args(forward_to_host_args.split(' '))
-            .output()?;
-
-        Ok(Self {
-            tap_device_name,
-            ip_address,
-        })
+        Ok(Self { tap_device_name })
     }
 }
 
@@ -82,5 +66,44 @@ impl Drop for IpTablesGuard {
             .args(["-F"])
             .output()
             .expect("Failed to flush iptables");
+    }
+}
+
+pub struct BridgeNetwork {
+    pub bridge_name: String,
+    pub ip_address: String,
+}
+
+impl BridgeNetwork {
+    pub fn new(bridge_name: &str, ip_address: &str) -> anyhow::Result<Self> {
+        let create_bridge_args = format!("link add name {} type bridge", bridge_name);
+        Command::new("ip")
+            .args(create_bridge_args.split(' '))
+            .output()?;
+
+        let create_ip_address_args = format!("addr add {}/24 dev {}", ip_address, bridge_name);
+        Command::new("ip")
+            .args(create_ip_address_args.split(' '))
+            .output()?;
+
+        let enable_bridge_args = format!("link set {} up", bridge_name);
+        Command::new("ip")
+            .args(enable_bridge_args.split(' '))
+            .output()?;
+
+        Ok(Self {
+            bridge_name: bridge_name.to_string(),
+            ip_address: ip_address.to_string(),
+        })
+    }
+}
+
+impl Drop for BridgeNetwork {
+    fn drop(&mut self) {
+        let delete_bridge_args = format!("link del {}", self.bridge_name);
+        Command::new("ip")
+            .args(delete_bridge_args.split(' '))
+            .output()
+            .expect("Failed to delete the bridge");
     }
 }
