@@ -1,5 +1,6 @@
 use crate::api::{
-    vm_actions_server::VmActions, PingRequest, PingResponse, ShutdownRequest, ShutdownResponse,
+    vm_actions_server::VmActions, GetDmesgRequest, GetDmesgResponse, PingRequest, PingResponse,
+    ShutdownRequest, ShutdownResponse,
 };
 
 pub mod net;
@@ -32,5 +33,15 @@ impl VmActions for VmService {
                 .expect("Failed to reboot");
         });
         Ok(tonic::Response::new(ShutdownResponse {}))
+    }
+
+    async fn get_dmesg(
+        &self,
+        _: tonic::Request<GetDmesgRequest>,
+    ) -> Result<tonic::Response<GetDmesgResponse>, tonic::Status> {
+        let output = std::process::Command::new("dmesg").output().unwrap().stdout;
+        Ok(tonic::Response::new(GetDmesgResponse {
+            text: String::from_utf8_lossy(&output).into(),
+        }))
     }
 }

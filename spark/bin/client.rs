@@ -1,10 +1,13 @@
 use clap::{Parser, ValueEnum};
-use spark_lib::api::{vm_actions_client::VmActionsClient, PingRequest, ShutdownRequest};
+use spark_lib::api::{
+    vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest,
+};
 
 #[derive(Clone, Debug, ValueEnum)]
 enum CommandKind {
     Ping,
     Shutdown,
+    GetDmesg,
 }
 
 #[derive(Parser, Debug)]
@@ -38,6 +41,12 @@ pub async fn main() -> anyhow::Result<()> {
             let request = tonic::Request::new(ShutdownRequest {});
             let response = client.shutdown(request).await?;
             println!("Response = {response:?}");
+        }
+        CommandKind::GetDmesg => {
+            let request = tonic::Request::new(GetDmesgRequest {});
+            let response = client.get_dmesg(request).await?;
+            let text = response.into_inner().text;
+            println!("{text}");
         }
     };
 
