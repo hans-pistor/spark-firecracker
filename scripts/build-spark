@@ -4,11 +4,11 @@ SCRIPT_DIRECTORY=$(dirname "$0")
 SPARK_DIR=$SCRIPT_DIRECTORY/../spark
 ROOTFS_DIR=$SCRIPT_DIRECTORY/../rootfs
 
-SPARK_SERVER_PATH=$SPARK_DIR/target/x86_64-unknown-linux-musl/debug/spark
+SPARK_SERVER_PATH=$SPARK_DIR/target/x86_64-unknown-linux-musl/release/spark
 
 pushd $(pwd)
 cd $SPARK_DIR
-cargo build  --target=x86_64-unknown-linux-musl
+cargo build  --release --target=x86_64-unknown-linux-musl
 popd
 
 cp $SPARK_SERVER_PATH $ROOTFS_DIR/usr/bin

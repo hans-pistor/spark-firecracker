@@ -4,8 +4,11 @@ package api;
 
 service VmActions {
     rpc Ping(PingRequest) returns (PingResponse);
+    rpc Shutdown(ShutdownRequest) returns (ShutdownResponse);
 }
 
 
 message PingRequest {}
 message PingResponse {}
+message ShutdownRequest {}
+message ShutdownResponse {}
