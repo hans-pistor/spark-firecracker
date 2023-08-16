@@ -21,7 +21,10 @@ struct Args {
     #[arg(long)]
     kernel_image_path: String,
 
-    #[arg(long, default_value = "console=ttyS0 reboot=k panic=1 pci=off")]
+    #[arg(
+        long,
+        default_value = "console=ttyS0 reboot=k panic=1 pci=off nomodules ipv6.disable=1 8250.nr_uarts=0  tsc=reliable quiet i8042.nokbd i8042.noaux"
+    )]
     boot_args: String,
 
     #[arg(long)]
