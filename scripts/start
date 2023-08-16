@@ -29,7 +29,7 @@ sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
 sudo ip link del $TAP_DEVICE 2> /dev/null || true
 sudo ip tuntap add $TAP_DEVICE mode tap
-sudo brctl addif br0 $TAP_DEVICE
+sudo ip link set $TAP_DEVICE master br0
 sudo ip link set $TAP_DEVICE up
 
 cp $ROOTFS_PATH /tmp/rootfs-$VM.ext4

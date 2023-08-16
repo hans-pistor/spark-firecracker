@@ -1,5 +1,6 @@
 use std::{
     marker::PhantomData,
+    path::PathBuf,
     process::{Child, Command},
 };
 
@@ -15,7 +16,6 @@ use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 pub mod models;
 
 pub const GUEST_INTERFACE: &str = "eth0";
-pub const HOST_GATEWAY: &str = "172.16.0.1";
 
 pub struct VmNotStarted;
 pub struct VmStarted;
@@ -26,18 +26,18 @@ impl FirecrackerState for VmStarted {}
 #[derive(Debug)]
 struct VmState {
     vm_id: usize,
-    data_directory: String,
+    data_directory: PathBuf,
     boot_source: Option<VmBootSource>,
     _vm_network: Option<VmNetwork>,
 }
 
 impl VmState {
-    pub fn firecracker_socket_path(&self) -> String {
-        format!("{}/firecracker.socket", self.data_directory)
+    pub fn firecracker_socket_path(&self) -> PathBuf {
+        self.data_directory.join("firecracker.socket")
     }
 
-    pub fn firecracker_logger_path(&self) -> String {
-        format!("{}/firecracker.log", self.data_directory)
+    pub fn firecracker_logger_path(&self) -> PathBuf {
+        self.data_directory.join("firecracker.log")
     }
 }
 
@@ -49,8 +49,13 @@ pub struct VirtualMachine<T: FirecrackerState> {
 }
 
 impl VirtualMachine<VmNotStarted> {
-    pub async fn new(firecracker_path: &str, vm_id: usize) -> anyhow::Result<Self> {
-        let data_directory_path = format!("/tmp/vm/{vm_id}");
+    pub async fn new(
+        firecracker_path: &str,
+        vm_id: usize,
+        boot_source: VmBootSource,
+        rootfs: VmDrive,
+    ) -> anyhow::Result<Self> {
+        let data_directory_path: PathBuf = format!("/tmp/vm/{vm_id}").into();
         if try_exists(&data_directory_path).await? {
             tokio::fs::remove_dir_all(&data_directory_path).await?;
         }
@@ -66,6 +71,8 @@ impl VirtualMachine<VmNotStarted> {
         let firecracker_process = Command::new(firecracker_path)
             .arg("--api-sock")
             .arg(&data_directory.firecracker_socket_path())
+            // .stdin(std::process::Stdio::piped())
+            // .stdout(std::process::Stdio::piped())
             .spawn()?;
 
         // Wait for the firecracker socket to appear
@@ -80,12 +87,29 @@ impl VirtualMachine<VmNotStarted> {
         .context("Firecracker socket did not appear within 500ms")?
         .context("Failed to check if the firecracker socket path exists")?;
 
-        Ok(Self {
+        let state = Self {
             vm_state: data_directory,
             firecracker_process,
             firecracker_client: Client::unix(),
             marker: PhantomData,
-        })
+        };
+
+        let state_with_boot_source = state.setup_boot_source(boot_source).await?;
+
+        let vm_rootfs_path = state_with_boot_source
+            .vm_state
+            .data_directory
+            .join("rootfs");
+        std::fs::copy(&rootfs.path_on_host, &vm_rootfs_path)?;
+
+        let state_with_rootfs = state_with_boot_source
+            .with_drive(VmDrive {
+                path_on_host: vm_rootfs_path.to_string_lossy().to_string(),
+                ..rootfs
+            })
+            .await?;
+
+        Ok(state_with_rootfs)
     }
 
     pub async fn with_logger(self) -> anyhow::Result<Self> {
@@ -143,11 +167,14 @@ impl VirtualMachine<VmNotStarted> {
         self,
         host_network_interface: &str,
         ip_address: &str,
+        gateway_ip: &str,
     ) -> anyhow::Result<Self> {
+        assert!(self.vm_state.vm_id < 256);
+
         let vm_network = VmNetwork::create(self.vm_state.vm_id, host_network_interface)?;
         let vm_network_interface = VmNetworkInterface {
             iface_id: GUEST_INTERFACE.into(),
-            guest_mac: "AA:FC:00:00:00:01".into(),
+            guest_mac: format!("AA:FC:00:00:00:{:02x}", self.vm_state.vm_id),
             host_dev_name: vm_network.tap_device_name.clone(),
         };
 
@@ -176,7 +203,7 @@ impl VirtualMachine<VmNotStarted> {
                     .setup_boot_source(VmBootSource {
                         boot_args: format!(
                             "{} IP_ADDRESS::{} IFACE::{} GATEWAY::{}",
-                            boot_source.boot_args, ip_address, GUEST_INTERFACE, HOST_GATEWAY
+                            boot_source.boot_args, ip_address, GUEST_INTERFACE, gateway_ip
                         ),
                         ..boot_source
                     })
