@@ -1,13 +1,14 @@
 set -eu
 
 VM=$1
+
 SCRIPT_DIRECTORY=$(dirname "$0")
-BIN_DIR=$SCRIPT_DIRECTORY/../bin
+BIN_DIR=$HOME/bin
 KERNEL_PATH=/tmp/vmlinux.bin
 ROOTFS_PATH=/tmp/rootfs.ext4
 
 ARCH="$(uname -m)"
-KERNEL_BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off nomodules ipv6.disable=1 8250.nr_uarts=0  tsc=reliable quiet i8042.nokbd i8042.noaux IP_ADDRESS::172.16.0.$VM IFACE::eth0 GATEWAY::172.16.0.1"
+KERNEL_BOOT_ARGS="console=ttyS0 reboot=k panic=1 pci=off IP_ADDRESS::172.16.0.$VM IFACE::eth0 GATEWAY::172.16.0.1"
 
 # Make sure linux kernel is available
 [ -e $KERNEL_PATH ] || wget -P /tmp https://s3.amazonaws.com/spec.ccfc.min/img/quickstart_guide/${ARCH}/kernels/vmlinux.bin
@@ -23,14 +24,38 @@ $SCRIPT_DIRECTORY/build-rootfs
 TAP_DEVICE="tap$VM"
 HOST_IFACE="ens33"
 
-# sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
+sudo sh -c "echo 1 > /proc/sys/net/ipv4/ip_forward"
 sudo iptables -t nat -A POSTROUTING -o $HOST_IFACE -j MASQUERADE
 sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
 
-sudo ip link del $TAP_DEVICE 2> /dev/null || true
-sudo ip tuntap add $TAP_DEVICE mode tap
-sudo ip link set $TAP_DEVICE master br0
-sudo ip link set $TAP_DEVICE up
+# Delete netns
+NAMESPACE=fc$VM
+sudo ip netns del $NAMESPACE || true
+sudo ip netns add $NAMESPACE
+
+# Create tap device
+sudo ip netns exec $NAMESPACE ip tuntap add $TAP_DEVICE mode tap
+sudo ip netns exec $NAMESPACE ip addr add 172.16.0.1/24 dev $TAP_DEVICE
+sudo ip netns exec $NAMESPACE ip link set $TAP_DEVICE up
+sudo ip netns exec $NAMESPACE iptables -A FORWARD -i $TAP_DEVICE -o ens33 -j ACCEPT
+sudo ip netns exec $NAMESPACE sudo iptables -t nat -A POSTROUTING -o $HOST_IFACE -j MASQUERADE
+sudo ip netns exec $NAMESPACE sudo iptables -A FORWARD -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+
+
+# # Setup bridge inside netns
+# sudo ip netns exec $NAMESPACE ip link add name br0 type bridge
+# sudo ip netns exec $NAMESPACE ip a add 172.16.0.1/24 dev br0
+# sudo ip netns exec $NAMESPACE ip link set br0 up
+# sudo ip netns exec $NAMESPACE iptables -A FORWARD -i br0 -o $HOST_IFACE -j ACCEPT
+
+# #Setup tap device inside netns
+# sudo ip netns exec $NAMESPACE ip link del $TAP_DEVICE 2> /dev/null || true
+# sudo ip netns exec $NAMESPACE ip tuntap add $TAP_DEVICE mode tap
+# sudo ip netns exec $NAMESPACE ip link set $TAP_DEVICE master br0
+# sudo ip netns exec $NAMESPACE ip link set $TAP_DEVICE up
+
+# Create veth pair inside namespace
+# sudo ip netns exec $NAMESPACE ip link add veth1 type veth peer name veth0
 
 cp $ROOTFS_PATH /tmp/rootfs-$VM.ext4
 
@@ -59,4 +84,7 @@ cat <<EOF > /tmp/vmconfig.json
 }
 EOF
 
-$BIN_DIR/firecracker --no-api --config-file /tmp/vmconfig.json
+API_SOCKET=/tmp/firecracker.$VM.socket
+sudo rm -rf $API_SOCKET
+
+sudo ip netns exec $NAMESPACE $BIN_DIR/firecracker --api-sock $API_SOCKET --config-file /tmp/vmconfig.json

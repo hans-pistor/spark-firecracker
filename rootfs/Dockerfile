@@ -6,7 +6,7 @@ WORKDIR /root
 RUN echo "root:root" | chpasswd
 
 # Download dependencies
-RUN apk add openrc util-linux
+RUN apk add openrc util-linux python3 curl
 
 # Setup login terminal on ttyS0
 RUN ln -s agetty /etc/init.d/agetty.ttyS0 \
@@ -21,6 +21,3 @@ RUN rc-update add devfs boot \
 COPY etc /etc
 COPY root /root
 copy usr /usr
-
-RUN rc-update add firecracker-internet default \
-    && rc-update add spark default
