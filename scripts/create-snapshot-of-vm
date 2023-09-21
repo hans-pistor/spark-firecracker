@@ -1,0 +1,35 @@
+set -eu
+
+VM=$1
+NAMESPACE=fc$VM
+API_SOCKET=/tmp/firecracker.$VM.socket
+
+sudo rm -rf /tmp/snapshot_file /tmp/mem_file
+
+
+# Pause the VM
+sudo ip netns exec $NAMESPACE curl --unix-socket $API_SOCKET -i \
+    -X PATCH 'http://localhost/vm' \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -d "{ \"state\": \"Paused\" }"
+
+
+# SNAPSHOT VM
+sudo ip netns exec $NAMESPACE curl --unix-socket $API_SOCKET -i \
+    -X PUT 'http://localhost/snapshot/create' \
+    -H  'Accept: application/json' \
+    -H  'Content-Type: application/json' \
+    -d '{
+            "snapshot_type": "Full",
+            "snapshot_path": "/tmp/snapshot_file",
+            "mem_file_path": "/tmp/mem_file",
+            "version": "1.1.0"
+    }'
+
+# Pause the VM
+sudo ip netns exec $NAMESPACE curl --unix-socket $API_SOCKET -i \
+    -X PATCH 'http://localhost/vm' \
+    -H 'Accept: application/json' \
+    -H 'Content-Type: application/json' \
+    -d "{ \"state\": \"Resumed\" }"

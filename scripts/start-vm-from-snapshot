@@ -1,0 +1,23 @@
+set -eu
+HOST_IFACE=ens33
+SCRIPT_DIRECTORY=$(dirname "$0")
+
+ORIGINAL_VM_ID=$1
+NEW_VM_ID=$2
+
+ORIGINAL_TAP_DEVICE="tap$ORIGINAL_VM_ID"
+API_SOCKET="/tmp/firecracker.$NEW_VM_ID.socket"
+sudo rm -f $API_SOCKET
+
+NAMESPACE=fc$NEW_VM_ID
+sudo ip netns del $NAMESPACE || true
+sudo ip netns add $NAMESPACE
+
+# Create tap device
+sudo ip netns exec $NAMESPACE ip tuntap add $ORIGINAL_TAP_DEVICE mode tap
+sudo ip netns exec $NAMESPACE ip addr add 172.16.0.1/24 dev $ORIGINAL_TAP_DEVICE
+sudo ip netns exec $NAMESPACE ip link set $ORIGINAL_TAP_DEVICE up
+
+sudo ip netns exec $NAMESPACE $SCRIPT_DIRECTORY/send-load-snapshot-command $NEW_VM_ID &
+
+sudo ip netns exec $NAMESPACE $HOME/bin/firecracker --api-sock $API_SOCKET

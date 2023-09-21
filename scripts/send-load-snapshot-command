@@ -1,0 +1,24 @@
+set -eu
+VM=$1
+API_SOCKET=/tmp/firecracker.$VM.socket
+
+# This is intended to run as a background process so we can retain control over the process that
+# will have the uVM serial console
+# Sleep 1 second so that we can start the firecracker process in the parent process.
+sleep 1
+
+
+curl --unix-socket $API_SOCKET -i \
+    -X PUT 'http://localhost/snapshot/load' \
+    -H  'Accept: application/json' \
+    -H  'Content-Type: application/json' \
+    -d '{
+            "snapshot_path": "/tmp/snapshot_file",
+            "mem_backend": {
+                "backend_path": "/tmp/mem_file",
+                "backend_type": "File"
+            },
+            "enable_diff_snapshots": true,
+            "resume_vm": true
+    }'
+
