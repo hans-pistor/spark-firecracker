@@ -1,7 +1,7 @@
 use std::{
     marker::PhantomData,
     path::PathBuf,
-    process::{Child, Command},
+    process::{Child, Command}, sync::Arc,
 };
 
 use anyhow::Context;
@@ -26,7 +26,7 @@ pub trait FirecrackerState {}
 impl FirecrackerState for VmNotStarted {}
 impl FirecrackerState for VmStarted {}
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct VmState {
     pub vm_id: usize,
     pub data_directory: PathBuf,
@@ -58,9 +58,10 @@ impl Drop for VmState {
     }
 }
 
+#[derive(Clone)]
 pub struct VirtualMachine<T: FirecrackerState> {
     vm_state: VmState,
-    firecracker_process: Child,
+    firecracker_process: Arc<Child>,
     firecracker_client: Client<UnixConnector>,
     marker: PhantomData<T>,
 }
@@ -131,7 +132,7 @@ impl VirtualMachine<VmNotStarted> {
 
         let state = Self {
             vm_state,
-            firecracker_process,
+            firecracker_process: Arc::from(firecracker_process),
             firecracker_client: Client::unix(),
             marker: PhantomData,
         };
@@ -270,5 +271,12 @@ impl VirtualMachine<VmNotStarted> {
             firecracker_client: self.firecracker_client,
             marker: PhantomData,
         })
+    }
+}
+
+
+impl<T: FirecrackerState> VirtualMachine<T> {
+    pub fn get_vm_id(&self) -> usize {
+        self.vm_state.vm_id
     }
 }

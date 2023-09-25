@@ -5,7 +5,7 @@ use std::{
 
 use crate::cmd::{CommandNamespace, self};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct VmNetwork {
     pub tap_device_name: String,
 }

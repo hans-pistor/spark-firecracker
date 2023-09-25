@@ -1,6 +1,6 @@
 use std::{ffi::OsStr, process::Command};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum CommandNamespace {
     Named(String),
     Global

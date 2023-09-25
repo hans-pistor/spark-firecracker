@@ -1,15 +1,26 @@
+use std::sync::{Arc, Mutex, RwLock};
+
+use anyhow::Context;
+use axum::{
+    extract::{Path, State},
+    response::{IntoResponse, Response},
+    routing, Router,
+};
 use clap::Parser;
+use hyper::StatusCode;
+use netns_rs::{NetNs, get_from_current_thread};
 use spark_lib::{
-    net::{IpTablesGuard},
+    net::IpTablesGuard,
     vm::{
         models::{VmBootSource, VmDrive},
-        VirtualMachine, VmStarted,
-    },
+        FirecrackerState, VirtualMachine, VmStarted,
+    }, api::{vm_actions_client::VmActionsClient, PingRequest, ShutdownRequest, GetDmesgRequest},
 };
+use tokio::signal::{self, unix::SignalKind};
 
 pub const BRIDGE_IP: &str = "172.16.0.1";
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(author, version, about)]
 struct Args {
     #[arg(long, default_value = "ens33")]
@@ -31,20 +42,114 @@ struct Args {
     root_fs_path: String,
 }
 
+#[derive(Clone)]
+struct AppState {
+    config: Args,
+    vms: Arc<RwLock<Vec<VirtualMachine<VmStarted>>>>,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Args::parse();
-    let _guard = IpTablesGuard::new(&config.host_network_interface)?;
+    let state = AppState {
+        config,
+        vms: Arc::default(),
+    };
+    let _guard = IpTablesGuard::new(&state.config.host_network_interface)?;
 
-    let _vm1 = spawn_vm(&config, 0).await?;
+    let app = Router::new()
+        .route("/vms/:vmid/execute/:action", routing::put(execute_action))
+        .route("/vms", routing::get(list_vms))
+        .route("/vms/:vmid", routing::put(spawn_vm))
+        .with_state(state);
 
-    tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+    axum::Server::bind(&"0.0.0.0:3000".parse()?)
+        .serve(app.into_make_service())
+        .with_graceful_shutdown(async {
+            let mut interrupt = signal::unix::signal(SignalKind::interrupt())
+                .expect("Failed to install SIGINT handler");
+            let mut terminate = signal::unix::signal(SignalKind::terminate())
+                .expect("Failed to install SIGTERM handler");
+            
+            let ctrl_c = async {
+                signal::ctrl_c()
+                    .await
+                    .expect("failed to install Ctrl+C handler");
+            };
+
+
+            tokio::select! {
+                _ = interrupt.recv() => {},
+                _ = terminate.recv() => {}
+                _ = ctrl_c => {}
+            }
+            println!("Shutting down the server");
+        })
+        .await?;
 
     Ok(())
 }
 
-async fn spawn_vm(config: &Args, vm_id: usize) -> anyhow::Result<VirtualMachine<VmStarted>> {
+async fn execute_action(
+    State(state): State<AppState>,
+    Path((vm_id, action)): Path<(usize, String)>,
+) -> Result<String, AppError> {
+    let vm_namespace = format!("fc-net{vm_id}");
+    let target_ns = NetNs::get(vm_namespace)?;
+    
+    let src_ns = get_from_current_thread()?;
+    if &src_ns != &target_ns {
+        target_ns.enter()?;
+    }
+
+    let mut client =
+        VmActionsClient::connect(format!("http://{}:{}", "172.16.0.2", 3000)).await?;
+
+    let response = match action.as_str() {
+        "ping" => {
+            let request = tonic::Request::new(PingRequest {});
+            let response = client.ping(request).await?;
+            format!("{response:?}")
+        }
+        "shutdown" => {
+            let request = tonic::Request::new(ShutdownRequest {});
+            let response = client.shutdown(request).await?;
+            format!("{response:?}")
+        }
+        "get-dmesg" => {
+            let request = tonic::Request::new(GetDmesgRequest {});
+            let response = client.get_dmesg(request).await?;
+            format!("{response:?}")
+        }
+        command => Err(anyhow::anyhow!("Unknown command: {command}"))?
+    };
+
+    if &src_ns != &target_ns {
+        src_ns.enter()?;
+    }
+    
+    Ok(response)
+}
+
+async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
+    let vms = state
+        .vms
+        .read()
+        .map_err(|e| anyhow::anyhow!("failed to lock VM mutex. {e}"))?;
+
+    let ids: Vec<usize> = vms.iter().map(|i| i.get_vm_id()).collect();
+
+    Ok(format!("{ids:?}"))
+}
+
+async fn spawn_vm(
+    State(state): State<AppState>,
+    Path(vm_id): Path<usize>,
+) -> Result<String, AppError> {
     assert!(vm_id + 2 < 256);
+
+    let config = &state.config;
+
     let boot_source = VmBootSource {
         kernel_image_path: config.kernel_image_path.clone(),
         boot_args: config.boot_args.clone(),
@@ -56,12 +161,41 @@ async fn spawn_vm(config: &Args, vm_id: usize) -> anyhow::Result<VirtualMachine<
         is_read_only: false,
     };
 
-    VirtualMachine::new(&config.firecracker_path, vm_id, boot_source, rootfs)
+    let vm = VirtualMachine::new(&config.firecracker_path, vm_id, boot_source, rootfs)
         .await?
         .with_logger()
         .await?
         .add_network_interface(&config.host_network_interface, "172.16.0.2", BRIDGE_IP)
         .await?
         .start()
-        .await
+        .await?;
+
+    let mut vms = state
+        .vms
+        .write()
+        .map_err(|e| anyhow::anyhow!("failed to lock VM mutex. {e}"))?;
+
+    vms.push(vm);
+    Ok(format!("Successfully spawned vm with id {vm_id}"))
+}
+
+struct AppError(anyhow::Error);
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Something went wrong: {}", self.0),
+        )
+            .into_response()
+    }
+}
+
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self(err.into())
+    }
 }
