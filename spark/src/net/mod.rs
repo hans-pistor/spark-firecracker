@@ -1,4 +1,9 @@
-use std::{ffi::OsStr, process::Command};
+use std::{
+    ffi::{OsStr, OsString},
+    process::Command,
+};
+
+use crate::cmd::{CommandNamespace, self};
 
 #[derive(Debug)]
 pub struct VmNetwork {
@@ -6,22 +11,38 @@ pub struct VmNetwork {
 }
 
 impl VmNetwork {
-    pub fn create(vm_id: usize, host_network_interface: &str) -> anyhow::Result<Self> {
+    pub fn create(vm_id: usize, host_network_interface: &str, namespace: &CommandNamespace) -> anyhow::Result<Self> {
         assert!(vm_id < 256);
         let tap_device_name = format!("fc-tap{vm_id}");
 
         // Create the tap device
-        run(
+        cmd::run(
+            namespace,
             "ip",
             format!("tuntap add {} mode tap", tap_device_name).split(' '),
         )?;
-        // Makes the interface a port in the bridge network `br0`
-        run(
+
+        cmd::run(
+            &namespace,
             "ip",
-            format!("link set dev {tap_device_name} master br0").split(' '),
+            format!("addr add 172.16.0.1/24 dev {tap_device_name}").split(' '),
         )?;
+
+        cmd::run(
+            &namespace,
+            "iptables",
+            format!("-A FORWARD -i {tap_device_name} -o {host_network_interface} -j ACCEPT")
+                .split(' '),
+        )?;
+
+        // Makes the interface a port in the bridge network `br0`
+        // run(
+        //     "ip",
+        //     format!("link set dev {tap_device_name} master br0").split(' '),
+        // )?;
         // Enables the new tap device
-        run("ip", format!("link set {} up", tap_device_name).split(' '))?;
+        cmd::run(&namespace, "ip", format!("link set {} up", tap_device_name).split(' '))?;
+
 
         Ok(Self { tap_device_name })
     }
@@ -29,12 +50,7 @@ impl VmNetwork {
 
 impl Drop for VmNetwork {
     fn drop(&mut self) {
-        // sudo ip link del $TAP_DEVICE 2> /dev/null || true
-        run(
-            "ip",
-            format!("link del {}", self.tap_device_name).split(' '),
-        )
-        .expect("Failed to delete the tap device");
+        // TAP device gets dropped when network namespace gets dropped.
     }
 }
 
@@ -65,47 +81,39 @@ impl Drop for IpTablesGuard {
     }
 }
 
-pub struct BridgeNetwork {
-    pub bridge_name: String,
-    pub ip_address: String,
-}
+// pub struct BridgeNetwork {
+//     pub bridge_name: String,
+//     pub ip_address: String,
+// }
 
-impl BridgeNetwork {
-    pub fn new(bridge_name: &str, ip_address: &str) -> anyhow::Result<Self> {
-        // Create bridge network
-        run(
-            "ip",
-            format!("link add name {} type bridge", bridge_name).split(' '),
-        )?;
+// impl BridgeNetwork {
+//     pub fn new(bridge_name: &str, ip_address: &str) -> anyhow::Result<Self> {
+//         // Create bridge network
+//         run(
+//             "ip",
+//             format!("link add name {} type bridge", bridge_name).split(' '),
+//         )?;
 
-        // Assign bridge network an IP address
-        run(
-            "ip",
-            format!("addr add {}/24 dev {}", ip_address, bridge_name).split(' '),
-        )?;
+//         // Assign bridge network an IP address
+//         run(
+//             "ip",
+//             format!("addr add {}/24 dev {}", ip_address, bridge_name).split(' '),
+//         )?;
 
-        // enable the bridge network
-        run("ip", format!("link set {} up", bridge_name).split(' '))?;
+//         // enable the bridge network
+//         run("ip", format!("link set {} up", bridge_name).split(' '))?;
 
-        Ok(Self {
-            bridge_name: bridge_name.to_string(),
-            ip_address: ip_address.to_string(),
-        })
-    }
-}
+//         Ok(Self {
+//             bridge_name: bridge_name.to_string(),
+//             ip_address: ip_address.to_string(),
+//         })
+//     }
+// }
 
-impl Drop for BridgeNetwork {
-    fn drop(&mut self) {
-        // Delete the bridge network
-        run("ip", format!("link del {}", self.bridge_name).split(' '))
-            .expect("Failed to delete the bridge network");
-    }
-}
-
-fn run<I, S>(program: &'static str, args: I) -> Result<std::process::Output, std::io::Error>
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<OsStr>,
-{
-    Command::new(program).args(args).output()
-}
+// impl Drop for BridgeNetwork {
+//     fn drop(&mut self) {
+//         // Delete the bridge network
+//         run("ip", format!("link del {}", self.bridge_name).split(' '))
+//             .expect("Failed to delete the bridge network");
+//     }
+// }

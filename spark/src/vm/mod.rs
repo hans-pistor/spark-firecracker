@@ -8,7 +8,10 @@ use anyhow::Context;
 use hyper::{Client, Request};
 use tokio::fs::try_exists;
 
-use crate::net::VmNetwork;
+use crate::{
+    cmd::{self, CommandNamespace},
+    net::VmNetwork,
+};
 
 use self::models::{VmBootSource, VmDrive, VmLogger, VmNetworkInterface};
 use hyperlocal::{UnixClientExt, UnixConnector, Uri};
@@ -25,10 +28,11 @@ impl FirecrackerState for VmStarted {}
 
 #[derive(Debug)]
 struct VmState {
-    vm_id: usize,
-    data_directory: PathBuf,
-    boot_source: Option<VmBootSource>,
-    _vm_network: Option<VmNetwork>,
+    pub vm_id: usize,
+    pub data_directory: PathBuf,
+    pub network_namespace: CommandNamespace,
+    pub boot_source: Option<VmBootSource>,
+    pub _vm_network: Option<VmNetwork>,
 }
 
 impl VmState {
@@ -38,6 +42,19 @@ impl VmState {
 
     pub fn firecracker_logger_path(&self) -> PathBuf {
         self.data_directory.join("firecracker.log")
+    }
+}
+
+impl Drop for VmState {
+    fn drop(&mut self) {
+        if let CommandNamespace::Named(namespace) = &self.network_namespace {
+            cmd::run(
+                &CommandNamespace::Global,
+                "ip",
+                format!("netns del {namespace}").split(' '),
+            )
+            .expect("failed to delete namespace");
+        }
     }
 }
 
@@ -61,23 +78,48 @@ impl VirtualMachine<VmNotStarted> {
         }
         tokio::fs::create_dir_all(&data_directory_path).await?;
 
-        let data_directory = VmState {
+        let namespace = CommandNamespace::Named(format!("fc-net{vm_id}"));
+        println!("Creating network namespace {namespace}");
+        // Create network namespace
+        cmd::run(
+            &CommandNamespace::Global,
+            "ip",
+            format!("netns add {namespace}").split(' '),
+        )?;
+
+        let vm_state = VmState {
             vm_id,
             data_directory: data_directory_path,
+            network_namespace: namespace,
             boot_source: None,
             _vm_network: None,
         };
 
-        let firecracker_process = Command::new(firecracker_path)
-            .arg("--api-sock")
-            .arg(&data_directory.firecracker_socket_path())
+        let firecracker_arguments = match &vm_state.network_namespace {
+            CommandNamespace::Global => (
+                firecracker_path,
+                format!(
+                    "--api-sock {}",
+                    &vm_state.firecracker_socket_path().to_string_lossy()
+                ),
+            ),
+            CommandNamespace::Named(ns) => (
+                "ip",
+                format!(
+                    "netns exec {ns} {firecracker_path} --api-sock {}",
+                    &vm_state.firecracker_socket_path().to_string_lossy()
+                ),
+            ),
+        };
+        let firecracker_process = Command::new(firecracker_arguments.0)
+            .args(firecracker_arguments.1.split(' '))
             // .stdin(std::process::Stdio::piped())
             // .stdout(std::process::Stdio::piped())
             .spawn()?;
 
         // Wait for the firecracker socket to appear
         tokio::time::timeout(std::time::Duration::from_millis(500), async {
-            while !tokio::fs::try_exists(&data_directory.firecracker_socket_path()).await? {
+            while !tokio::fs::try_exists(&vm_state.firecracker_socket_path()).await? {
                 tokio::time::sleep(std::time::Duration::from_millis(10)).await;
             }
 
@@ -88,7 +130,7 @@ impl VirtualMachine<VmNotStarted> {
         .context("Failed to check if the firecracker socket path exists")?;
 
         let state = Self {
-            vm_state: data_directory,
+            vm_state,
             firecracker_process,
             firecracker_client: Client::unix(),
             marker: PhantomData,
@@ -130,7 +172,7 @@ impl VirtualMachine<VmNotStarted> {
         Ok(self)
     }
 
-    pub async fn setup_boot_source(self, boot_source: VmBootSource) -> anyhow::Result<Self> {
+    pub async fn setup_boot_source(mut self, boot_source: VmBootSource) -> anyhow::Result<Self> {
         let request = Request::builder()
             .method("PUT")
             .uri(Uri::new(
@@ -140,13 +182,9 @@ impl VirtualMachine<VmNotStarted> {
             .body(serde_json::to_string(&boot_source)?.into())?;
 
         self.firecracker_client.request(request).await?;
-        Ok(Self {
-            vm_state: VmState {
-                boot_source: Some(boot_source),
-                ..self.vm_state
-            },
-            ..self
-        })
+        self.vm_state.boot_source = Some(boot_source);
+
+        Ok(self)
     }
 
     pub async fn with_drive(self, drive: VmDrive) -> anyhow::Result<Self> {
@@ -164,14 +202,20 @@ impl VirtualMachine<VmNotStarted> {
     }
 
     pub async fn add_network_interface(
-        self,
+        mut self,
         host_network_interface: &str,
         ip_address: &str,
         gateway_ip: &str,
     ) -> anyhow::Result<Self> {
         assert!(self.vm_state.vm_id < 256);
 
-        let vm_network = VmNetwork::create(self.vm_state.vm_id, host_network_interface)?;
+        let vm_network = VmNetwork::create(
+            self.vm_state.vm_id,
+            host_network_interface,
+            &self.vm_state.network_namespace,
+        )?;
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+
         let vm_network_interface = VmNetworkInterface {
             iface_id: GUEST_INTERFACE.into(),
             guest_mac: format!("AA:FC:00:00:00:{:02x}", self.vm_state.vm_id),
@@ -188,26 +232,19 @@ impl VirtualMachine<VmNotStarted> {
 
         self.firecracker_client.request(request).await?;
 
-        let state_with_vm_network = Self {
-            vm_state: VmState {
-                _vm_network: Some(vm_network),
-                ..self.vm_state
-            },
-            ..self
-        };
+        self.vm_state._vm_network = Some(vm_network);
 
-        match state_with_vm_network.vm_state.boot_source.clone() {
+        match self.vm_state.boot_source.clone() {
             None => panic!("Boot source must be set before adding a network interface"),
             Some(boot_source) => {
-                state_with_vm_network
-                    .setup_boot_source(VmBootSource {
-                        boot_args: format!(
-                            "{} IP_ADDRESS::{} IFACE::{} GATEWAY::{}",
-                            boot_source.boot_args, ip_address, GUEST_INTERFACE, gateway_ip
-                        ),
-                        ..boot_source
-                    })
-                    .await
+                self.setup_boot_source(VmBootSource {
+                    boot_args: format!(
+                        "{} IP_ADDRESS::{} IFACE::{} GATEWAY::{}",
+                        boot_source.boot_args, ip_address, GUEST_INTERFACE, gateway_ip
+                    ),
+                    ..boot_source
+                })
+                .await
             }
         }
     }
@@ -226,6 +263,7 @@ impl VirtualMachine<VmNotStarted> {
             )?;
 
         self.firecracker_client.request(request).await?;
+
         Ok(VirtualMachine {
             vm_state: self.vm_state,
             firecracker_process: self.firecracker_process,

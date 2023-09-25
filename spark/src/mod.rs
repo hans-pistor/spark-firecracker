@@ -5,6 +5,7 @@ use crate::api::{
 
 pub mod net;
 pub mod vm;
+pub mod cmd;
 
 pub mod api {
     tonic::include_proto!("api");

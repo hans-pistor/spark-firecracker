@@ -3,7 +3,7 @@ set -eu
 VM=$1
 
 SCRIPT_DIRECTORY=$(dirname "$0")
-BIN_DIR=$HOME/bin
+BIN_DIR=$SCRIPT_DIRECTORY/../bin
 KERNEL_PATH=/tmp/vmlinux.bin
 ROOTFS_PATH=/tmp/rootfs.ext4
 

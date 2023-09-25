@@ -1,6 +1,6 @@
 use clap::Parser;
 use spark_lib::{
-    net::{BridgeNetwork, IpTablesGuard},
+    net::{IpTablesGuard},
     vm::{
         models::{VmBootSource, VmDrive},
         VirtualMachine, VmStarted,
@@ -34,11 +34,9 @@ struct Args {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     let config = Args::parse();
-    let _bridge = BridgeNetwork::new("br0", BRIDGE_IP);
     let _guard = IpTablesGuard::new(&config.host_network_interface)?;
 
-    let vm1 = spawn_vm(&config, 0).await?;
-    let vm2 = spawn_vm(&config, 1).await?;
+    let _vm1 = spawn_vm(&config, 0).await?;
 
     tokio::time::sleep(std::time::Duration::from_secs(60)).await;
 
@@ -47,7 +45,6 @@ async fn main() -> anyhow::Result<()> {
 
 async fn spawn_vm(config: &Args, vm_id: usize) -> anyhow::Result<VirtualMachine<VmStarted>> {
     assert!(vm_id + 2 < 256);
-    let ip_address = format!("172.16.0.{}", vm_id + 2);
     let boot_source = VmBootSource {
         kernel_image_path: config.kernel_image_path.clone(),
         boot_args: config.boot_args.clone(),
@@ -63,7 +60,7 @@ async fn spawn_vm(config: &Args, vm_id: usize) -> anyhow::Result<VirtualMachine<
         .await?
         .with_logger()
         .await?
-        .add_network_interface(&config.host_network_interface, &ip_address, BRIDGE_IP)
+        .add_network_interface(&config.host_network_interface, "172.16.0.2", BRIDGE_IP)
         .await?
         .start()
         .await
