@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex, RwLock};
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+};
 
 use anyhow::Context;
 use axum::{
@@ -8,13 +11,14 @@ use axum::{
 };
 use clap::Parser;
 use hyper::StatusCode;
-use netns_rs::{NetNs, get_from_current_thread};
+use netns_rs::{get_from_current_thread, NetNs};
 use spark_lib::{
+    api::{vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest},
     net::IpTablesGuard,
     vm::{
         models::{VmBootSource, VmDrive},
         FirecrackerState, VirtualMachine, VmStarted,
-    }, api::{vm_actions_client::VmActionsClient, PingRequest, ShutdownRequest, GetDmesgRequest},
+    },
 };
 use tokio::signal::{self, unix::SignalKind};
 
@@ -45,7 +49,25 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     config: Args,
-    vms: Arc<RwLock<Vec<VirtualMachine<VmStarted>>>>,
+    vms: Arc<RwLock<HashMap<usize, VirtualMachine<VmStarted>>>>,
+}
+
+impl AppState {
+    fn read_vms(
+        &self,
+    ) -> anyhow::Result<RwLockReadGuard<'_, HashMap<usize, VirtualMachine<VmStarted>>>> {
+        self.vms
+            .read()
+            .map_err(|e| anyhow::anyhow!("Failed to get a read lock on VMs"))
+    }
+
+    fn write_vms(
+        &self,
+    ) -> anyhow::Result<RwLockWriteGuard<'_, HashMap<usize, VirtualMachine<VmStarted>>>> {
+        self.vms
+            .write()
+            .map_err(|e| anyhow::anyhow!("Failed to get a read lock on VMs"))
+    }
 }
 
 #[tokio::main]
@@ -70,13 +92,12 @@ async fn main() -> anyhow::Result<()> {
                 .expect("Failed to install SIGINT handler");
             let mut terminate = signal::unix::signal(SignalKind::terminate())
                 .expect("Failed to install SIGTERM handler");
-            
+
             let ctrl_c = async {
                 signal::ctrl_c()
                     .await
                     .expect("failed to install Ctrl+C handler");
             };
-
 
             tokio::select! {
                 _ = interrupt.recv() => {},
@@ -96,14 +117,13 @@ async fn execute_action(
 ) -> Result<String, AppError> {
     let vm_namespace = format!("fc-net{vm_id}");
     let target_ns = NetNs::get(vm_namespace)?;
-    
+
     let src_ns = get_from_current_thread()?;
     if &src_ns != &target_ns {
         target_ns.enter()?;
     }
 
-    let mut client =
-        VmActionsClient::connect(format!("http://{}:{}", "172.16.0.2", 3000)).await?;
+    let mut client = VmActionsClient::connect(format!("http://{}:{}", "172.16.0.2", 3000)).await?;
 
     let response = match action.as_str() {
         "ping" => {
@@ -121,23 +141,20 @@ async fn execute_action(
             let response = client.get_dmesg(request).await?;
             format!("{response:?}")
         }
-        command => Err(anyhow::anyhow!("Unknown command: {command}"))?
+        command => Err(anyhow::anyhow!("Unknown command: {command}"))?,
     };
 
     if &src_ns != &target_ns {
         src_ns.enter()?;
     }
-    
+
     Ok(response)
 }
 
 async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
-    let vms = state
-        .vms
-        .read()
-        .map_err(|e| anyhow::anyhow!("failed to lock VM mutex. {e}"))?;
+    let vms = state.read_vms()?;
 
-    let ids: Vec<usize> = vms.iter().map(|i| i.get_vm_id()).collect();
+    let ids: Vec<usize> = vms.iter().map(|(vm_id, _)| *vm_id).collect();
 
     Ok(format!("{ids:?}"))
 }
@@ -147,6 +164,10 @@ async fn spawn_vm(
     Path(vm_id): Path<usize>,
 ) -> Result<String, AppError> {
     assert!(vm_id + 2 < 256);
+
+    if state.read_vms()?.contains_key(&vm_id) {
+        return Err(anyhow::anyhow!("The VM id {vm_id} is already taken."))?;
+    }
 
     let config = &state.config;
 
@@ -170,12 +191,9 @@ async fn spawn_vm(
         .start()
         .await?;
 
-    let mut vms = state
-        .vms
-        .write()
-        .map_err(|e| anyhow::anyhow!("failed to lock VM mutex. {e}"))?;
+    let mut vms = state.write_vms()?;
+    vms.insert(vm_id, vm);
 
-    vms.push(vm);
     Ok(format!("Successfully spawned vm with id {vm_id}"))
 }
 
