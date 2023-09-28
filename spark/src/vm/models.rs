@@ -30,3 +30,16 @@ pub struct VmLogger {
     pub show_level: bool,
     pub show_log_origin: bool,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SnapshotType {
+    Full
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VmSnapshotRequest {
+    pub snapshot_type: SnapshotType,
+    pub snapshot_path: String,
+    pub mem_file_path: String,
+    pub version: String
+}

@@ -14,11 +14,12 @@ use hyper::StatusCode;
 use netns_rs::{get_from_current_thread, NetNs};
 use spark_lib::{
     api::{vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest},
+    cmd::CommandNamespace,
     net::IpTablesGuard,
     vm::{
-        models::{VmBootSource, VmDrive},
+        models::{SnapshotType, VmBootSource, VmDrive, VmSnapshotRequest},
         FirecrackerState, VirtualMachine, VmStarted,
-    }, cmd::CommandNamespace,
+    },
 };
 use tokio::signal::{self, unix::SignalKind};
 use uuid::Uuid;
@@ -119,9 +120,9 @@ async fn execute_action(
     let namespace = match state.read_vms()?.get(&vm_id) {
         Some(vm) => match vm.vm_state.network_namespace() {
             CommandNamespace::Named(name) => name.clone(),
-            _ => unimplemented!()
+            _ => unimplemented!(),
         },
-        None => Err(anyhow::anyhow!("No VM with id {vm_id} present"))?
+        None => Err(anyhow::anyhow!("No VM with id {vm_id} present"))?,
     };
     let target_ns = NetNs::get(namespace)?;
 
@@ -148,6 +149,38 @@ async fn execute_action(
             let response = client.get_dmesg(request).await?;
             format!("{response:?}")
         }
+
+        "snapshot" => {
+            let vm = state.write_vms()?.remove(&vm_id).unwrap();
+            let snapshot_request = VmSnapshotRequest {
+                snapshot_type: SnapshotType::Full,
+                snapshot_path: vm
+                    .vm_state
+                    .data_directory
+                    .join("snapshot_path")
+                    .to_string_lossy()
+                    .into(),
+                mem_file_path: vm
+                    .vm_state
+                    .data_directory
+                    .join("mem_file")
+                    .to_string_lossy()
+                    .into(),
+                version: "1.1.0".into(),
+            };
+
+            let vm = vm
+                .pause_vm()
+                .await?
+                .snapshot_vm(&snapshot_request)
+                .await?
+                .resume_vm()
+                .await?;
+
+            state.write_vms()?.insert(vm_id.clone(), vm);
+
+            format!("Successfully took snapshot of vm {vm_id}. Stored snapshot file at {} and memory file at {}", snapshot_request.snapshot_path, snapshot_request.mem_file_path)
+        }
         command => Err(anyhow::anyhow!("Unknown command: {command}"))?,
     };
 
@@ -166,9 +199,7 @@ async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
     Ok(format!("{ids:?}"))
 }
 
-async fn spawn_vm(
-    State(state): State<AppState>,
-) -> Result<String, AppError> {
+async fn spawn_vm(State(state): State<AppState>) -> Result<String, AppError> {
     let config = &state.config;
     let vm_id = {
         let vms = state.read_vms()?;

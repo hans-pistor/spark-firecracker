@@ -1,7 +1,8 @@
 use std::{
     marker::PhantomData,
     path::PathBuf,
-    process::{Child, Command}, sync::Arc,
+    process::{Child, Command},
+    sync::Arc,
 };
 
 use anyhow::Context;
@@ -14,7 +15,7 @@ use crate::{
     net::VmNetwork,
 };
 
-use self::models::{VmBootSource, VmDrive, VmLogger, VmNetworkInterface};
+use self::models::{VmBootSource, VmDrive, VmLogger, VmNetworkInterface, VmSnapshotRequest};
 use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 
 pub mod models;
@@ -23,14 +24,17 @@ pub const GUEST_INTERFACE: &str = "eth0";
 
 pub struct VmNotStarted;
 pub struct VmStarted;
+pub struct VmPaused;
 pub trait FirecrackerState {}
 impl FirecrackerState for VmNotStarted {}
 impl FirecrackerState for VmStarted {}
+impl FirecrackerState for VmPaused {}
 
 #[derive(Debug, Clone)]
 pub struct VmState {
     pub vm_id: Uuid,
     pub data_directory: PathBuf,
+
     pub network_namespace: CommandNamespace,
     pub boot_source: Option<VmBootSource>,
     pub _vm_network: Option<VmNetwork>,
@@ -213,18 +217,19 @@ impl VirtualMachine<VmNotStarted> {
         ip_address: &str,
         gateway_ip: &str,
     ) -> anyhow::Result<Self> {
-        let vm_network = VmNetwork::create(
-            host_network_interface,
-            &self.vm_state.network_namespace,
-        )?;
+        let vm_network =
+            VmNetwork::create(host_network_interface, &self.vm_state.network_namespace)?;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
         let bytes = &self.vm_state.vm_id.as_bytes()[0..4];
-        let guest_mac = format!("AA:FC:{:02x}:{:02x}:{:02x}:{:02x}", bytes[0], bytes[1], bytes[2], bytes[3]);
+        let guest_mac = format!(
+            "AA:FC:{:02x}:{:02x}:{:02x}:{:02x}",
+            bytes[0], bytes[1], bytes[2], bytes[3]
+        );
         println!("Guest mac: {guest_mac}");
         let vm_network_interface = VmNetworkInterface {
             iface_id: GUEST_INTERFACE.into(),
-            guest_mac, 
+            guest_mac,
             host_dev_name: vm_network.tap_device_name.clone(),
         };
 
@@ -279,4 +284,49 @@ impl VirtualMachine<VmNotStarted> {
     }
 }
 
+impl VirtualMachine<VmStarted> {
+    pub async fn pause_vm(self) -> anyhow::Result<VirtualMachine<VmPaused>> {
+        let request = Request::builder()
+            .method("PATCH")
+            .uri(Uri::new(self.vm_state.firecracker_socket_path(), "/vm"))
+            .body(serde_json::json!({"state": "Paused"}).to_string().into())?;
 
+        self.firecracker_client.request(request).await?;
+
+        Ok(VirtualMachine {
+            vm_state: self.vm_state,
+            firecracker_process: self.firecracker_process,
+            firecracker_client: self.firecracker_client,
+            marker: PhantomData,
+        })
+    }
+}
+
+impl VirtualMachine<VmPaused> {
+    pub async fn snapshot_vm(self, snapshot_request: &VmSnapshotRequest) -> anyhow::Result<Self> {
+        let request = Request::builder()
+            .method("PUT")
+            .uri(Uri::new(self.vm_state.firecracker_socket_path(), "/snapshot/create"))
+            .body(serde_json::to_string(snapshot_request)?.into())?;
+
+        self.firecracker_client.request(request).await?;
+
+        Ok(self)
+    }
+
+    pub async fn resume_vm(self) -> anyhow::Result<VirtualMachine<VmStarted>> {
+        let request = Request::builder()
+            .method("PATCH")
+            .uri(Uri::new(self.vm_state.firecracker_socket_path(), "/vm"))
+            .body(serde_json::json!({"state": "Resumed"}).to_string().into())?;
+
+        self.firecracker_client.request(request).await?;
+
+        Ok(VirtualMachine {
+            vm_state: self.vm_state,
+            firecracker_process: self.firecracker_process,
+            firecracker_client: self.firecracker_client,
+            marker: PhantomData,
+        })
+    }
+}
