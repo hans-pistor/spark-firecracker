@@ -1,9 +1,9 @@
 use std::{
     collections::HashMap,
-    sync::{Arc, Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard},
+    sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-use anyhow::Context;
+
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
@@ -17,8 +17,7 @@ use spark_lib::{
     cmd::CommandNamespace,
     net::IpTablesGuard,
     vm::{
-        models::{SnapshotType, VmBootSource, VmDrive, VmSnapshotRequest},
-        FirecrackerState, VirtualMachine, VmStarted,
+        models::{SnapshotType, VmBootSource, VmDrive, VmSnapshotRequest}, VirtualMachine, VmStarted,
     },
 };
 use tokio::signal::{self, unix::SignalKind};
