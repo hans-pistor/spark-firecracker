@@ -1,0 +1,17 @@
+set -eu
+
+CREATE_OUTPUT=$(curl -s -X PUT 0.0.0.0:3000/vms/create)
+VM=$(echo $CREATE_OUTPUT | cut -d' ' -f 6)
+
+# Wait for VM to finish creation
+TIMEOUT=$((SECONDS+2))
+while [ $SECONDS -lt $TIMEOUT ]; do
+    PING_RESPONSE=$(curl -s -X PUT 0.0.0.0:3000/vms/$VM/execute/ping)
+    if [[ "$PING_RESPONSE" == *"PingResponse"* ]]; then
+        echo "Got a successful ping response for $VM"
+        exit 0
+    fi
+done
+
+echo "Never got a successful ping response for $VM, something is wrong"
+exit 1

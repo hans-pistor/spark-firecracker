@@ -1,0 +1,56 @@
+set -eu
+
+wait_for_ping() {
+    VM=$1
+    TIMEOUT=$((SECONDS+2))
+    while [ $SECONDS -lt $TIMEOUT ]; do
+        PING_RESPONSE=$(curl -s -X PUT 0.0.0.0:3000/vms/$VM/execute/ping)
+        if [[ "$PING_RESPONSE" == *"PingResponse"* ]]; then
+            echo "Got a successful ping response for $VM"
+            return  0
+        fi
+    done
+
+    return 1
+}
+
+assert_vm_alive() {
+    VM=$1
+    wait_for_ping $VM
+    if [ "$?" -eq 1 ]; then
+        echo "Never received successful ping result for $VM, exiting"
+        exit 1
+    fi
+}
+
+CREATE_OUTPUT=$(curl -s -X PUT 0.0.0.0:3000/vms/create)
+ORIGINAL_VM=$(echo $CREATE_OUTPUT | cut -d' ' -f 6)
+
+# Wait for VM to finish creation
+assert_vm_alive $ORIGINAL_VM
+
+# Create snapshot of VM
+CREATE_SNAPSHOT_RESPONSE=$(curl -s -X PUT 0.0.0.0:3000/vms/$ORIGINAL_VM/execute/snapshot)
+
+
+cat <<EOF > /tmp/vm_resume.json
+{
+    "snapshot_path": "/tmp/vm/$ORIGINAL_VM/snapshot_path",
+    "mem_backend": {
+        "backend_path": "/tmp/vm/$ORIGINAL_VM/mem_file",
+        "backend_type": "File"
+    },
+    "enable_diff_snapshots": true,
+    "resume_vm": false
+}
+EOF
+
+RESUME_OUTPUT=$(curl \
+-s \
+-X PUT \
+-H "Content-Type: application/json" \
+0.0.0.0:3000/vms/resume \
+-d "@/tmp/vm_resume.json")
+RESUMED_VM=$(echo $RESUME_OUTPUT | cut -d' ' -f 6)
+
+assert_vm_alive $RESUMED_VM
