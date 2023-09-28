@@ -29,7 +29,7 @@ impl FirecrackerState for VmStarted {}
 
 #[derive(Debug, Clone)]
 pub struct VmState {
-    pub vm_id: String,
+    pub vm_id: Uuid,
     pub data_directory: PathBuf,
     pub network_namespace: CommandNamespace,
     pub boot_source: Option<VmBootSource>,
@@ -74,7 +74,7 @@ pub struct VirtualMachine<T: FirecrackerState> {
 impl VirtualMachine<VmNotStarted> {
     pub async fn new(
         firecracker_path: &str,
-        vm_id: String,
+        vm_id: Uuid,
         boot_source: VmBootSource,
         rootfs: VmDrive,
     ) -> anyhow::Result<Self> {
@@ -219,9 +219,12 @@ impl VirtualMachine<VmNotStarted> {
         )?;
         tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
+        let bytes = &self.vm_state.vm_id.as_bytes()[0..4];
+        let guest_mac = format!("AA:FC:{:02x}:{:02x}:{:02x}:{:02x}", bytes[0], bytes[1], bytes[2], bytes[3]);
+        println!("Guest mac: {guest_mac}");
         let vm_network_interface = VmNetworkInterface {
             iface_id: GUEST_INTERFACE.into(),
-            guest_mac: format!("AA:FC:00:00:{:02x}:{:02x}", 5, 5),
+            guest_mac, 
             host_dev_name: vm_network.tap_device_name.clone(),
         };
 

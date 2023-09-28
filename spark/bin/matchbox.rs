@@ -172,9 +172,9 @@ async fn spawn_vm(
     let config = &state.config;
     let vm_id = {
         let vms = state.read_vms()?;
-        let mut id = Uuid::new_v4().to_string();
-        while vms.contains_key(&id) {
-            id = Uuid::new_v4().to_string();
+        let mut id = Uuid::new_v4();
+        while vms.contains_key(&id.to_string()) {
+            id = Uuid::new_v4();
         }
 
         id
@@ -201,7 +201,7 @@ async fn spawn_vm(
         .await?;
 
     let mut vms = state.write_vms()?;
-    vms.insert(vm_id.clone(), vm);
+    vms.insert(vm_id.to_string(), vm);
 
     Ok(format!("Successfully spawned vm with id {vm_id}"))
 }
