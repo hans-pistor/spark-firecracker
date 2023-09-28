@@ -114,8 +114,8 @@ impl VirtualMachine<VmNotStarted> {
         };
         let firecracker_process = Command::new(firecracker_arguments.0)
             .args(firecracker_arguments.1.split(' '))
-            // .stdin(std::process::Stdio::piped())
-            // .stdout(std::process::Stdio::piped())
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
             .spawn()?;
 
         // Wait for the firecracker socket to appear
