@@ -3,11 +3,10 @@ use std::{
     sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
-
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
-    routing, Router,
+    routing, Json, Router,
 };
 use clap::Parser;
 use hyper::StatusCode;
@@ -17,7 +16,8 @@ use spark_lib::{
     cmd::CommandNamespace,
     net::IpTablesGuard,
     vm::{
-        models::{SnapshotType, VmBootSource, VmDrive, VmSnapshotRequest}, VirtualMachine, VmStarted,
+        models::{LoadSnapshotRequest, SnapshotType, VmBootSource, VmDrive, VmSnapshotRequest},
+        VirtualMachine, VmStarted,
     },
 };
 use tokio::signal::{self, unix::SignalKind};
@@ -83,7 +83,8 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/vms/:vmid/execute/:action", routing::put(execute_action))
         .route("/vms", routing::get(list_vms))
-        .route("/vms", routing::put(spawn_vm))
+        .route("/vms/create", routing::put(create_vm))
+        .route("/vms/resume", routing::put(resume_vm))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:3000".parse()?)
@@ -197,8 +198,10 @@ async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
 
     Ok(format!("{ids:?}"))
 }
-
-async fn spawn_vm(State(state): State<AppState>) -> Result<String, AppError> {
+async fn resume_vm(
+    State(state): State<AppState>,
+    Json(load_snapshot_request): Json<LoadSnapshotRequest>,
+) -> Result<String, AppError> {
     let config = &state.config;
     let vm_id = {
         let vms = state.read_vms()?;
@@ -210,22 +213,55 @@ async fn spawn_vm(State(state): State<AppState>) -> Result<String, AppError> {
         id
     };
 
-    let boot_source = VmBootSource {
-        kernel_image_path: config.kernel_image_path.clone(),
-        boot_args: config.boot_args.clone(),
-    };
-    let rootfs = VmDrive {
-        drive_id: "rootfs".into(),
-        path_on_host: config.root_fs_path.clone(),
-        is_root_device: true,
-        is_read_only: false,
-    };
-
-    let vm = VirtualMachine::new(&config.firecracker_path, vm_id.clone(), boot_source, rootfs)
+    let vm = VirtualMachine::new(&config.firecracker_path, vm_id.clone())
         .await?
         .with_logger()
         .await?
+        .load_snapshot(&config.host_network_interface, load_snapshot_request)
+        .await?
+        .resume_vm()
+        .await?;
+
+    let mut vms = state.write_vms()?;
+    vms.insert(vm_id.to_string(), vm);
+
+    Ok(format!("Successfully resume vm with id {vm_id}"))
+}
+
+async fn create_vm(State(state): State<AppState>) -> Result<String, AppError> {
+    let config = &state.config;
+    let vm_id = {
+        let vms = state.read_vms()?;
+        let mut id = Uuid::new_v4();
+        while vms.contains_key(&id.to_string()) {
+            id = Uuid::new_v4();
+        }
+
+        id
+    };
+
+    let vm = VirtualMachine::new(&config.firecracker_path, vm_id.clone())
+        .await?
+        .with_logger()
+        .await?
+        .setup_boot_source(VmBootSource {
+            kernel_image_path: config.kernel_image_path.clone(),
+            boot_args: config.boot_args.clone(),
+        })
+        .await?
         .add_network_interface(&config.host_network_interface, "172.16.0.2", BRIDGE_IP)
+        .await?;
+
+    let rootfs_path = vm.vm_state.data_directory.join("rootfs");
+    std::fs::copy(&config.root_fs_path, &rootfs_path)?;
+
+    let vm = vm
+        .with_drive(VmDrive {
+            drive_id: "rootfs".into(),
+            path_on_host: rootfs_path.to_string_lossy().into(),
+            is_root_device: true,
+            is_read_only: false,
+        })
         .await?
         .start()
         .await?;

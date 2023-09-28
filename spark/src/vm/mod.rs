@@ -15,7 +15,9 @@ use crate::{
     net::VmNetwork,
 };
 
-use self::models::{VmBootSource, VmDrive, VmLogger, VmNetworkInterface, VmSnapshotRequest};
+use self::models::{
+    LoadSnapshotRequest, VmBootSource, VmDrive, VmLogger, VmNetworkInterface, VmSnapshotRequest,
+};
 use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 
 pub mod models;
@@ -76,12 +78,7 @@ pub struct VirtualMachine<T: FirecrackerState> {
 }
 
 impl VirtualMachine<VmNotStarted> {
-    pub async fn new(
-        firecracker_path: &str,
-        vm_id: Uuid,
-        boot_source: VmBootSource,
-        rootfs: VmDrive,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(firecracker_path: &str, vm_id: Uuid) -> anyhow::Result<Self> {
         let data_directory_path: PathBuf = format!("/tmp/vm/{vm_id}").into();
         if try_exists(&data_directory_path).await? {
             tokio::fs::remove_dir_all(&data_directory_path).await?;
@@ -146,22 +143,7 @@ impl VirtualMachine<VmNotStarted> {
             marker: PhantomData,
         };
 
-        let state_with_boot_source = state.setup_boot_source(boot_source).await?;
-
-        let vm_rootfs_path = state_with_boot_source
-            .vm_state
-            .data_directory
-            .join("rootfs");
-        std::fs::copy(&rootfs.path_on_host, &vm_rootfs_path)?;
-
-        let state_with_rootfs = state_with_boot_source
-            .with_drive(VmDrive {
-                path_on_host: vm_rootfs_path.to_string_lossy().to_string(),
-                ..rootfs
-            })
-            .await?;
-
-        Ok(state_with_rootfs)
+        Ok(state)
     }
 
     pub async fn with_logger(self) -> anyhow::Result<Self> {
@@ -209,6 +191,37 @@ impl VirtualMachine<VmNotStarted> {
         self.firecracker_client.request(request).await?;
 
         Ok(self)
+    }
+
+    pub async fn load_snapshot(
+        mut self,
+        host_network_interface: &str,
+        load_snapshot_request: LoadSnapshotRequest,
+    ) -> anyhow::Result<VirtualMachine<VmPaused>> {
+        let vm_network =
+            VmNetwork::create(host_network_interface, &self.vm_state.network_namespace)?;
+        self.vm_state._vm_network = Some(vm_network);
+
+        let load_snapshot_request = LoadSnapshotRequest {
+            resume_vm: false,
+            ..load_snapshot_request
+        };
+        let request = Request::builder()
+            .method("PUT")
+            .uri(Uri::new(
+                self.vm_state.firecracker_socket_path(),
+                "/snapshot/load",
+            ))
+            .body(serde_json::to_string(&load_snapshot_request)?.into())?;
+
+        self.firecracker_client.request(request).await?;
+
+        Ok(VirtualMachine {
+            vm_state: self.vm_state,
+            firecracker_process: self.firecracker_process,
+            firecracker_client: self.firecracker_client,
+            marker: PhantomData,
+        })
     }
 
     pub async fn add_network_interface(
@@ -306,7 +319,10 @@ impl VirtualMachine<VmPaused> {
     pub async fn snapshot_vm(self, snapshot_request: &VmSnapshotRequest) -> anyhow::Result<Self> {
         let request = Request::builder()
             .method("PUT")
-            .uri(Uri::new(self.vm_state.firecracker_socket_path(), "/snapshot/create"))
+            .uri(Uri::new(
+                self.vm_state.firecracker_socket_path(),
+                "/snapshot/create",
+            ))
             .body(serde_json::to_string(snapshot_request)?.into())?;
 
         self.firecracker_client.request(request).await?;

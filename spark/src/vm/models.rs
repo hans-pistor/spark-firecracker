@@ -43,3 +43,22 @@ pub struct VmSnapshotRequest {
     pub mem_file_path: String,
     pub version: String
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum BackendType {
+    File, Uffd
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryBackend {
+    pub backend_path: String,
+    pub backend_type: BackendType
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LoadSnapshotRequest {
+    pub snapshot_path: String,
+    pub mem_backend: MemoryBackend,
+    pub enable_diff_snapshots: bool,
+    pub resume_vm: bool
+}
