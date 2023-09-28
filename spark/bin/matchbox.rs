@@ -18,9 +18,10 @@ use spark_lib::{
     vm::{
         models::{VmBootSource, VmDrive},
         FirecrackerState, VirtualMachine, VmStarted,
-    },
+    }, cmd::CommandNamespace,
 };
 use tokio::signal::{self, unix::SignalKind};
+use uuid::Uuid;
 
 pub const BRIDGE_IP: &str = "172.16.0.1";
 
@@ -49,24 +50,24 @@ struct Args {
 #[derive(Clone)]
 struct AppState {
     config: Args,
-    vms: Arc<RwLock<HashMap<usize, VirtualMachine<VmStarted>>>>,
+    vms: Arc<RwLock<HashMap<String, VirtualMachine<VmStarted>>>>,
 }
 
 impl AppState {
     fn read_vms(
         &self,
-    ) -> anyhow::Result<RwLockReadGuard<'_, HashMap<usize, VirtualMachine<VmStarted>>>> {
+    ) -> anyhow::Result<RwLockReadGuard<'_, HashMap<String, VirtualMachine<VmStarted>>>> {
         self.vms
             .read()
-            .map_err(|e| anyhow::anyhow!("Failed to get a read lock on VMs"))
+            .map_err(|_| anyhow::anyhow!("Failed to get a read lock on VMs"))
     }
 
     fn write_vms(
         &self,
-    ) -> anyhow::Result<RwLockWriteGuard<'_, HashMap<usize, VirtualMachine<VmStarted>>>> {
+    ) -> anyhow::Result<RwLockWriteGuard<'_, HashMap<String, VirtualMachine<VmStarted>>>> {
         self.vms
             .write()
-            .map_err(|e| anyhow::anyhow!("Failed to get a read lock on VMs"))
+            .map_err(|_| anyhow::anyhow!("Failed to get a read lock on VMs"))
     }
 }
 
@@ -82,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     let app = Router::new()
         .route("/vms/:vmid/execute/:action", routing::put(execute_action))
         .route("/vms", routing::get(list_vms))
-        .route("/vms/:vmid", routing::put(spawn_vm))
+        .route("/vms", routing::put(spawn_vm))
         .with_state(state);
 
     axum::Server::bind(&"0.0.0.0:3000".parse()?)
@@ -113,10 +114,16 @@ async fn main() -> anyhow::Result<()> {
 
 async fn execute_action(
     State(state): State<AppState>,
-    Path((vm_id, action)): Path<(usize, String)>,
+    Path((vm_id, action)): Path<(String, String)>,
 ) -> Result<String, AppError> {
-    let vm_namespace = format!("fc-net{vm_id}");
-    let target_ns = NetNs::get(vm_namespace)?;
+    let namespace = match state.read_vms()?.get(&vm_id) {
+        Some(vm) => match vm.vm_state.network_namespace() {
+            CommandNamespace::Named(name) => name.clone(),
+            _ => unimplemented!()
+        },
+        None => Err(anyhow::anyhow!("No VM with id {vm_id} present"))?
+    };
+    let target_ns = NetNs::get(namespace)?;
 
     let src_ns = get_from_current_thread()?;
     if &src_ns != &target_ns {
@@ -154,22 +161,24 @@ async fn execute_action(
 async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
     let vms = state.read_vms()?;
 
-    let ids: Vec<usize> = vms.iter().map(|(vm_id, _)| *vm_id).collect();
+    let ids: Vec<String> = vms.keys().cloned().collect();
 
     Ok(format!("{ids:?}"))
 }
 
 async fn spawn_vm(
     State(state): State<AppState>,
-    Path(vm_id): Path<usize>,
 ) -> Result<String, AppError> {
-    assert!(vm_id + 2 < 256);
-
-    if state.read_vms()?.contains_key(&vm_id) {
-        return Err(anyhow::anyhow!("The VM id {vm_id} is already taken."))?;
-    }
-
     let config = &state.config;
+    let vm_id = {
+        let vms = state.read_vms()?;
+        let mut id = Uuid::new_v4().to_string();
+        while vms.contains_key(&id) {
+            id = Uuid::new_v4().to_string();
+        }
+
+        id
+    };
 
     let boot_source = VmBootSource {
         kernel_image_path: config.kernel_image_path.clone(),
@@ -182,7 +191,7 @@ async fn spawn_vm(
         is_read_only: false,
     };
 
-    let vm = VirtualMachine::new(&config.firecracker_path, vm_id, boot_source, rootfs)
+    let vm = VirtualMachine::new(&config.firecracker_path, vm_id.clone(), boot_source, rootfs)
         .await?
         .with_logger()
         .await?
@@ -192,7 +201,7 @@ async fn spawn_vm(
         .await?;
 
     let mut vms = state.write_vms()?;
-    vms.insert(vm_id, vm);
+    vms.insert(vm_id.clone(), vm);
 
     Ok(format!("Successfully spawned vm with id {vm_id}"))
 }

@@ -7,6 +7,7 @@ use std::{
 use anyhow::Context;
 use hyper::{Client, Request};
 use tokio::fs::try_exists;
+use uuid::Uuid;
 
 use crate::{
     cmd::{self, CommandNamespace},
@@ -27,8 +28,8 @@ impl FirecrackerState for VmNotStarted {}
 impl FirecrackerState for VmStarted {}
 
 #[derive(Debug, Clone)]
-struct VmState {
-    pub vm_id: usize,
+pub struct VmState {
+    pub vm_id: String,
     pub data_directory: PathBuf,
     pub network_namespace: CommandNamespace,
     pub boot_source: Option<VmBootSource>,
@@ -42,6 +43,10 @@ impl VmState {
 
     pub fn firecracker_logger_path(&self) -> PathBuf {
         self.data_directory.join("firecracker.log")
+    }
+
+    pub fn network_namespace(&self) -> &CommandNamespace {
+        &self.network_namespace
     }
 }
 
@@ -60,7 +65,7 @@ impl Drop for VmState {
 
 #[derive(Clone)]
 pub struct VirtualMachine<T: FirecrackerState> {
-    vm_state: VmState,
+    pub vm_state: VmState,
     firecracker_process: Arc<Child>,
     firecracker_client: Client<UnixConnector>,
     marker: PhantomData<T>,
@@ -69,7 +74,7 @@ pub struct VirtualMachine<T: FirecrackerState> {
 impl VirtualMachine<VmNotStarted> {
     pub async fn new(
         firecracker_path: &str,
-        vm_id: usize,
+        vm_id: String,
         boot_source: VmBootSource,
         rootfs: VmDrive,
     ) -> anyhow::Result<Self> {
@@ -79,7 +84,7 @@ impl VirtualMachine<VmNotStarted> {
         }
         tokio::fs::create_dir_all(&data_directory_path).await?;
 
-        let namespace = CommandNamespace::Named(format!("fc-net{vm_id}"));
+        let namespace = CommandNamespace::Named(format!("fc-{}", vm_id.to_string()));
         println!("Creating network namespace {namespace}");
         // Create network namespace
         cmd::run(
@@ -208,10 +213,7 @@ impl VirtualMachine<VmNotStarted> {
         ip_address: &str,
         gateway_ip: &str,
     ) -> anyhow::Result<Self> {
-        assert!(self.vm_state.vm_id < 256);
-
         let vm_network = VmNetwork::create(
-            self.vm_state.vm_id,
             host_network_interface,
             &self.vm_state.network_namespace,
         )?;
@@ -219,7 +221,7 @@ impl VirtualMachine<VmNotStarted> {
 
         let vm_network_interface = VmNetworkInterface {
             iface_id: GUEST_INTERFACE.into(),
-            guest_mac: format!("AA:FC:00:00:00:{:02x}", self.vm_state.vm_id),
+            guest_mac: format!("AA:FC:00:00:{:02x}:{:02x}", 5, 5),
             host_dev_name: vm_network.tap_device_name.clone(),
         };
 
@@ -275,8 +277,3 @@ impl VirtualMachine<VmNotStarted> {
 }
 
 
-impl<T: FirecrackerState> VirtualMachine<T> {
-    pub fn get_vm_id(&self) -> usize {
-        self.vm_state.vm_id
-    }
-}

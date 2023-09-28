@@ -11,9 +11,8 @@ pub struct VmNetwork {
 }
 
 impl VmNetwork {
-    pub fn create(vm_id: usize, host_network_interface: &str, namespace: &CommandNamespace) -> anyhow::Result<Self> {
-        assert!(vm_id < 256);
-        let tap_device_name = format!("fc-tap{vm_id}");
+    pub fn create(host_network_interface: &str, namespace: &CommandNamespace) -> anyhow::Result<Self> {
+        let tap_device_name = format!("fc-tap");
 
         // Create the tap device
         cmd::run(
