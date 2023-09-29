@@ -1,5 +1,5 @@
 use clap::{Parser, ValueEnum};
-use spark_lib::api::{
+use spark_models::api::{
     vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest,
 };
 

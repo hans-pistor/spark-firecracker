@@ -11,8 +11,8 @@ use axum::{
 use clap::Parser;
 use hyper::StatusCode;
 use netns_rs::{get_from_current_thread, NetNs};
-use spark_lib::{
-    api::{vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest},
+use spark_models::api::{vm_actions_client::VmActionsClient, GetDmesgRequest, PingRequest, ShutdownRequest};
+use crate::{
     cmd::CommandNamespace,
     net::IpTablesGuard,
     vm::{
@@ -22,6 +22,10 @@ use spark_lib::{
 };
 use tokio::signal::{self, unix::SignalKind};
 use uuid::Uuid;
+
+pub mod net;
+pub mod vm;
+pub mod cmd;
 
 pub const BRIDGE_IP: &str = "172.16.0.1";
 
@@ -198,6 +202,7 @@ async fn list_vms(State(state): State<AppState>) -> Result<String, AppError> {
 
     Ok(format!("{ids:?}"))
 }
+
 async fn resume_vm(
     State(state): State<AppState>,
     Json(load_snapshot_request): Json<LoadSnapshotRequest>,

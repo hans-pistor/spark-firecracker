@@ -1,11 +1,5 @@
-use crate::api::{
-    vm_actions_server::VmActions, GetDmesgRequest, GetDmesgResponse, PingRequest, PingResponse,
-    ShutdownRequest, ShutdownResponse,
-};
-
-pub mod net;
-pub mod vm;
-pub mod cmd;
+use crate::api::*;
+use crate::vm_actions_server::VmActions;
 
 pub mod api {
     tonic::include_proto!("api");

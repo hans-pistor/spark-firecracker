@@ -1,7 +1,7 @@
 set -eu
 
 SCRIPT_DIRECTORY=$(dirname "$0")
-SPARK_DIR=$SCRIPT_DIRECTORY/../spark
+SPARK_DIR=$SCRIPT_DIRECTORY/../project/spark
 ROOTFS_DIR=$SCRIPT_DIRECTORY/../rootfs
 
 SPARK_SERVER_PATH=$SPARK_DIR/target/x86_64-unknown-linux-musl/release/spark

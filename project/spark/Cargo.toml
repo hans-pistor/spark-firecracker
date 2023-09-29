@@ -3,10 +3,6 @@ name = "spark"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-name = "spark_lib"
-path = "src/mod.rs"
-
 [[bin]]
 name = "spark"
 path = "bin/server.rs"
@@ -15,25 +11,12 @@ path = "bin/server.rs"
 name = "spark-client"
 path = "bin/client.rs"
 
-[[bin]]
-name = "matchbox"
-path = "bin/matchbox.rs"
-
-
 [dependencies]
 anyhow = "1.0.71"
 clap = { version = "4.3.4", features = ["derive"] }
-hyper = { version = "0.14" }
-hyperlocal = "0.8.0"
-prost = "0.11.9"
-serde = { version = "1.0.164", features = ["derive"] }
-serde_json = "1.0.97"
 tokio = { version = "1.28.2", features = ["full"] }
 tonic = "0.9.2"
-axum = "0.6.20"
-axum-macros = "0.3"
-netns-rs = "0.1"
-uuid = { version = "1.4", features = ["v4"]}
+spark-models = { path = "../spark-models" }
 
 [build-dependencies]
 tonic-build = "0.9.2"

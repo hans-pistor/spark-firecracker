@@ -4,10 +4,12 @@ use std::{
     process::{Child, Command},
     sync::Arc,
 };
+use std::io::Write;
 
 use anyhow::Context;
 use hyper::{Client, Request};
 use tokio::fs::try_exists;
+use userfaultfd::UffdBuilder;
 use uuid::Uuid;
 
 use crate::{
@@ -16,7 +18,7 @@ use crate::{
 };
 
 use self::models::{
-    LoadSnapshotRequest, VmBootSource, VmDrive, VmLogger, VmNetworkInterface, VmSnapshotRequest,
+    LoadSnapshotRequest, VmBootSource, VmDrive, VmLogger, VmNetworkInterface, VmSnapshotRequest, BackendType,
 };
 use hyperlocal::{UnixClientExt, UnixConnector, Uri};
 
@@ -206,6 +208,16 @@ impl VirtualMachine<VmNotStarted> {
             resume_vm: false,
             ..load_snapshot_request
         };
+
+        if load_snapshot_request.mem_backend.backend_type == BackendType::Uffd {
+            let uffd = UffdBuilder::new()
+            .close_on_exec(true)
+            .non_blocking(true)
+            .user_mode_only(true)
+            .create()
+            .unwrap();
+        }
+
         let request = Request::builder()
             .method("PUT")
             .uri(Uri::new(
@@ -344,5 +356,50 @@ impl VirtualMachine<VmPaused> {
             firecracker_client: self.firecracker_client,
             marker: PhantomData,
         })
+    }
+}
+
+
+pub struct MemoryMapping {
+    /// Raw C-style pointer to the starting address for the memory mapping. Immutable value.
+    addr: *mut u8,
+    /// Length of the mapping. Immutable value.
+    size: usize,
+}
+
+impl MemoryMapping {
+    fn new_with_flags_and_fd(size: usize, fd: i32, flags: i32) -> MemoryMapping {
+        let addr = unsafe {
+            libc::mmap(
+                std::ptr::null_mut(),
+                size,
+                libc::PROT_READ | libc::PROT_WRITE,
+                flags | libc::MAP_NORESERVE,
+                fd,
+                0,
+            )
+        };
+        if addr == libc::MAP_FAILED {
+            panic!("{}", std::io::Error::last_os_error());
+        }
+        MemoryMapping {
+            addr: addr as *mut u8,
+            size,
+        }
+    }
+
+    fn write_slice(&self, buf: &[u8], offset: usize) -> std::io::Result<usize> {
+        unsafe {
+            let mut slice: &mut [u8] =
+                &mut std::slice::from_raw_parts_mut(self.addr, self.size)[offset..];
+            slice.write(buf)
+        }
+    }
+
+    fn read_slice(&self, mut buf: &mut [u8], offset: usize) -> std::io::Result<usize> {
+        unsafe {
+            let slice: &[u8] = &std::slice::from_raw_parts(self.addr, self.size)[offset..];
+            buf.write(slice)
+        }
     }
 }

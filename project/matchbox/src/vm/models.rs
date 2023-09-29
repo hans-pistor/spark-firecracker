@@ -44,7 +44,7 @@ pub struct VmSnapshotRequest {
     pub version: String
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum BackendType {
     File, Uffd
 }

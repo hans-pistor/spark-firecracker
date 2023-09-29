@@ -1,6 +1,6 @@
 use clap::Parser;
-use spark_lib::api::vm_actions_server::VmActionsServer;
-use spark_lib::VmService;
+use spark_models::api::vm_actions_server::VmActionsServer;
+use spark_models::VmService;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
